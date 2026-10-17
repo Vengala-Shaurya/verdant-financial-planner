@@ -8,7 +8,7 @@ import {
   BookOpen,
   Bell,
   RefreshCw,
-  TrendingUp,
+  LogOut,
   Receipt
 } from 'lucide-react';
 
@@ -19,7 +19,9 @@ interface SidebarProps {
   onOpenNotifications: () => void;
   onQuickResetDemo: () => void;
   onOpenAskVerdant: () => void;
+  onLogout: () => void;
   userName: string;
+  isDemo: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -29,7 +31,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenNotifications,
   onQuickResetDemo,
   onOpenAskVerdant,
-  userName
+  onLogout,
+  userName,
+  isDemo
 }) => {
   const navItems = [
     { id: 'dashboard', label: 'Living Ledger', icon: Compass, badge: null },
@@ -122,22 +126,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* User Status and Academic Demo Reset Footer */}
-      <div className="p-4 border-t border-[#D8DCD1] bg-[#FBF9F4]">
-        <div className="flex items-center justify-between mb-3">
+      {/* User Status, Demo Badge, and Logout Footer */}
+      <div className="p-4 border-t border-[#D8DCD1] bg-[#FBF9F4] space-y-2.5">
+        <div className="flex items-center justify-between">
           <div className="truncate">
-            <p className="text-xs font-semibold text-[#183D32] truncate">{userName || 'Arjun Verma'}</p>
-            <p className="text-[10px] text-[#202822]/60 font-mono-num">Academic Review Demo</p>
+            <p className="text-xs font-semibold text-[#183D32] truncate">{userName || 'User'}</p>
+            <p className="text-[10px] text-[#202822]/60 font-mono-num">
+              {isDemo ? 'Academic Demo Profile' : 'Personal Verified Account'}
+            </p>
           </div>
-          <span className="w-2 h-2 rounded-full bg-[#183D32]" title="System Online" />
+          <span
+            className={`w-2 h-2 rounded-full ${isDemo ? 'bg-[#C66D51]' : 'bg-[#183D32]'}`}
+            title={isDemo ? 'Demo Mode' : 'Personal Account Active'}
+          />
         </div>
 
+        {isDemo && (
+          <button
+            onClick={onQuickResetDemo}
+            className="w-full flex items-center justify-center space-x-1.5 text-xs py-1.5 px-3 border border-[#D8DCD1] rounded-sm bg-[#FFFEFA] text-[#183D32] hover:bg-[#D5EE75]/20 hover:border-[#183D32] transition-colors font-medium"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Reset Demo (₹50k/₹22k)</span>
+          </button>
+        )}
+
         <button
-          onClick={onQuickResetDemo}
-          className="w-full flex items-center justify-center space-x-1.5 text-xs py-2 px-3 border border-[#D8DCD1] rounded-sm bg-[#FFFEFA] text-[#183D32] hover:bg-[#D5EE75]/20 hover:border-[#183D32] transition-colors font-medium"
+          onClick={onLogout}
+          className="w-full flex items-center justify-center space-x-1.5 text-xs py-1.5 px-3 border border-[#D8DCD1] rounded-sm bg-[#FFFEFA] text-[#C66D51] hover:bg-[#FDF3F0] transition-colors font-medium"
         >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Reset Demo (₹50k/₹22k)</span>
+          <LogOut className="w-3.5 h-3.5" />
+          <span>Exit / Sign Out</span>
         </button>
       </div>
     </aside>

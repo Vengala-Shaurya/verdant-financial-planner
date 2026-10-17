@@ -67,7 +67,7 @@ export const GoalPage: React.FC<GoalPageProps> = ({
   const fetchGoals = async () => {
     try {
       setLoading(true);
-      const res = await api.getGoals(1);
+      const res = await api.getGoals();
       setGoals(res.goals);
       setSummary(res.summary);
     } catch (err: any) {

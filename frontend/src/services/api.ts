@@ -9,16 +9,118 @@ import {
 
 const API_BASE = '/api';
 
+// Token management in memory / sessionStorage
+let authToken: string | null = sessionStorage.getItem('verdant_auth_token');
+
+export const setAuthToken = (token: string | null) => {
+  authToken = token;
+  if (token) {
+    sessionStorage.setItem('verdant_auth_token', token);
+  } else {
+    sessionStorage.removeItem('verdant_auth_token');
+  }
+};
+
+export const getAuthToken = () => authToken;
+
+const authHeaders = (customHeaders: Record<string, string> = {}) => {
+  const headers: Record<string, string> = { ...customHeaders };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  return headers;
+};
+
 export const api = {
-  // Demo Login / Profile
-  async demoLogin(): Promise<{ user: UserProfile; message: string }> {
+  // Authentication & Session
+  async demoLogin(): Promise<{ user: UserProfile; message: string; token: string }> {
     const res = await fetch(`${API_BASE}/auth/demo-login`, { method: 'POST' });
     if (!res.ok) throw new Error('Failed to load demo profile');
+    const data = await res.json();
+    if (data.token) setAuthToken(data.token);
+    return data;
+  },
+
+  async login(credentials: { email: string; password: string }): Promise<{ user: UserProfile; message: string; token: string }> {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.errors ? data.errors.join(', ') : 'Sign in failed');
+    }
+    if (data.token) setAuthToken(data.token);
+    return data;
+  },
+
+  async register(registrationData: { name: string; email: string; password: string; password_confirm: string }): Promise<{ user: UserProfile; message: string; token: string }> {
+    const res = await fetch(`${API_BASE}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(registrationData)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.errors ? data.errors.join(', ') : 'Registration failed');
+    }
+    if (data.token) setAuthToken(data.token);
+    return data;
+  },
+
+  async getMe(): Promise<{ user: UserProfile }> {
+    const res = await fetch(`${API_BASE}/auth/me`, {
+      headers: authHeaders()
+    });
+    if (!res.ok) throw new Error('Session invalid or expired');
     return res.json();
   },
 
-  async getProfile(userId = 1): Promise<{ user: UserProfile }> {
-    const res = await fetch(`${API_BASE}/auth/profile?user_id=${userId}`);
+  async logout(): Promise<void> {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: authHeaders()
+      });
+    } finally {
+      setAuthToken(null);
+    }
+  },
+
+  async submitOnboarding(data: {
+    monthly_income: number;
+    fixed_expenses: number;
+    variable_expenses: number;
+    existing_savings: number;
+    debt_obligations: number;
+    debt_in_fixed?: boolean;
+    currency?: string;
+    initial_goal?: {
+      name: string;
+      category: string;
+      target_amount: number;
+      current_amount: number;
+      target_date: string;
+      priority: string;
+    };
+  }): Promise<{ user: UserProfile; message: string }> {
+    const res = await fetch(`${API_BASE}/auth/onboarding`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      throw new Error(result.errors ? result.errors.join(', ') : 'Failed to complete onboarding');
+    }
+    return result;
+  },
+
+  async getProfile(): Promise<{ user: UserProfile }> {
+    const res = await fetch(`${API_BASE}/auth/profile`, {
+      headers: authHeaders()
+    });
     if (!res.ok) throw new Error('Failed to fetch profile');
     return res.json();
   },
@@ -26,7 +128,7 @@ export const api = {
   async updateProfile(profile: Partial<UserProfile>): Promise<{ user: UserProfile; message: string }> {
     const res = await fetch(`${API_BASE}/auth/profile`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(profile)
     });
     if (!res.ok) {
@@ -37,22 +139,27 @@ export const api = {
   },
 
   // Dashboard Overview
-  async getDashboardOverview(userId = 1): Promise<DashboardOverview> {
-    const res = await fetch(`${API_BASE}/dashboard/overview?user_id=${userId}`);
+  async getDashboardOverview(): Promise<DashboardOverview> {
+    const res = await fetch(`${API_BASE}/dashboard/overview`, {
+      headers: authHeaders()
+    });
     if (!res.ok) throw new Error('Failed to fetch dashboard data');
     return res.json();
   },
 
   // Expenses
-  async getExpenses(userId = 1, category?: string, search?: string): Promise<{
+  async getExpenses(category?: string, search?: string): Promise<{
     expenses: ExpenseItem[];
     category_breakdown: { category: string; total: number; count: number }[];
     total_spent: number;
   }> {
-    let url = `${API_BASE}/expenses/?user_id=${userId}`;
-    if (category) url += `&category=${encodeURIComponent(category)}`;
-    if (search) url += `&search=${encodeURIComponent(search)}`;
-    const res = await fetch(url);
+    let url = `${API_BASE}/expenses/`;
+    const params = new URLSearchParams();
+    if (category) params.append('category', category);
+    if (search) params.append('search', search);
+    if (params.toString()) url += `?${params.toString()}`;
+
+    const res = await fetch(url, { headers: authHeaders() });
     if (!res.ok) throw new Error('Failed to fetch expenses');
     return res.json();
   },
@@ -60,7 +167,7 @@ export const api = {
   async addExpense(expense: Partial<ExpenseItem>): Promise<{ expense: ExpenseItem; message: string }> {
     const res = await fetch(`${API_BASE}/expenses/`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(expense)
     });
     if (!res.ok) {
@@ -73,7 +180,7 @@ export const api = {
   async updateExpense(id: number, expense: Partial<ExpenseItem>): Promise<{ expense: ExpenseItem; message: string }> {
     const res = await fetch(`${API_BASE}/expenses/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(expense)
     });
     if (!res.ok) {
@@ -84,13 +191,16 @@ export const api = {
   },
 
   async deleteExpense(id: number): Promise<{ message: string }> {
-    const res = await fetch(`${API_BASE}/expenses/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/expenses/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
     if (!res.ok) throw new Error('Failed to delete expense');
     return res.json();
   },
 
   // Goals
-  async getGoals(userId = 1): Promise<{
+  async getGoals(): Promise<{
     goals: GoalItem[];
     summary: {
       total_target: number;
@@ -99,7 +209,9 @@ export const api = {
       active_goals_count: number;
     };
   }> {
-    const res = await fetch(`${API_BASE}/goals/?user_id=${userId}`);
+    const res = await fetch(`${API_BASE}/goals/`, {
+      headers: authHeaders()
+    });
     if (!res.ok) throw new Error('Failed to fetch goals');
     return res.json();
   },
@@ -107,7 +219,7 @@ export const api = {
   async addGoal(goal: Partial<GoalItem>): Promise<{ goal: GoalItem; message: string }> {
     const res = await fetch(`${API_BASE}/goals/`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(goal)
     });
     if (!res.ok) {
@@ -120,7 +232,7 @@ export const api = {
   async updateGoal(id: number, goal: Partial<GoalItem>): Promise<{ goal: GoalItem; message: string }> {
     const res = await fetch(`${API_BASE}/goals/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(goal)
     });
     if (!res.ok) {
@@ -133,7 +245,7 @@ export const api = {
   async contributeToGoal(id: number, amount: number): Promise<{ goal: GoalItem; message: string }> {
     const res = await fetch(`${API_BASE}/goals/${id}/contribute`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ amount })
     });
     if (!res.ok) {
@@ -144,89 +256,103 @@ export const api = {
   },
 
   async deleteGoal(id: number): Promise<{ message: string }> {
-    const res = await fetch(`${API_BASE}/goals/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/goals/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
     if (!res.ok) throw new Error('Failed to delete goal');
     return res.json();
   },
 
   // Savings Plans
-  async generatePlan(userId = 1): Promise<{ plan: SavingsPlan; message: string }> {
+  async generatePlan(): Promise<{ plan: SavingsPlan; message: string }> {
     const res = await fetch(`${API_BASE}/plans/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId })
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({})
     });
     if (!res.ok) throw new Error('Failed to generate savings plan');
     return res.json();
   },
 
-  async savePlan(userId = 1, plan: SavingsPlan): Promise<{ plan_id: number; message: string }> {
+  async savePlan(plan: SavingsPlan): Promise<{ plan_id: number; message: string }> {
     const res = await fetch(`${API_BASE}/plans/save`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, plan })
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ plan })
     });
     if (!res.ok) throw new Error('Failed to save savings plan');
     return res.json();
   },
 
-  async getActivePlan(userId = 1): Promise<{
+  async getActivePlan(): Promise<{
     plan: SavingsPlan | null;
     revisions: { id: number; monthly_surplus: number; recommended_savings: number; savings_rate: number; created_at: string; is_active: number }[];
   }> {
-    const res = await fetch(`${API_BASE}/plans/active?user_id=${userId}`);
+    const res = await fetch(`${API_BASE}/plans/active`, {
+      headers: authHeaders()
+    });
     if (!res.ok) throw new Error('Failed to fetch active plan');
     return res.json();
   },
 
   // Notifications
-  async getNotifications(userId = 1): Promise<{ notifications: InAppNotification[] }> {
-    const res = await fetch(`${API_BASE}/dashboard/notifications?user_id=${userId}`);
+  async getNotifications(): Promise<{ notifications: InAppNotification[] }> {
+    const res = await fetch(`${API_BASE}/dashboard/notifications`, {
+      headers: authHeaders()
+    });
     if (!res.ok) throw new Error('Failed to fetch notifications');
     return res.json();
   },
 
   async markNotificationRead(id: number): Promise<void> {
-    await fetch(`${API_BASE}/dashboard/notifications/${id}/read`, { method: 'PUT' });
+    await fetch(`${API_BASE}/dashboard/notifications/${id}/read`, {
+      method: 'PUT',
+      headers: authHeaders()
+    });
   },
 
-  async markAllNotificationsRead(userId = 1): Promise<void> {
+  async markAllNotificationsRead(): Promise<void> {
     await fetch(`${API_BASE}/dashboard/notifications/read-all`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId })
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({})
     });
   },
 
   // AI Integration Features
-  async getPlanInsights(userId = 1, plan?: SavingsPlan): Promise<{ insights: any }> {
+  async getPlanInsights(plan?: SavingsPlan): Promise<{ insights: any }> {
     const res = await fetch(`${API_BASE}/ai/plan-insights`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, plan })
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ plan })
     });
     if (!res.ok) throw new Error('Failed to fetch AI plan insights');
     return res.json();
   },
 
-  async getSpendingInsights(userId = 1): Promise<{ spending_insights: any }> {
-    const res = await fetch(`${API_BASE}/ai/spending-insights?user_id=${userId}`);
+  async getSpendingInsights(): Promise<{ spending_insights: any }> {
+    const res = await fetch(`${API_BASE}/ai/spending-insights`, {
+      headers: authHeaders()
+    });
     if (!res.ok) throw new Error('Failed to fetch spending insights');
     return res.json();
   },
 
-  async askVerdant(query: string, userId = 1): Promise<{ response: any }> {
+  async askVerdant(query: string): Promise<{ response: any }> {
     const res = await fetch(`${API_BASE}/ai/ask`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, query })
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ query })
     });
     if (!res.ok) throw new Error('Failed to query Ask VERDANT');
     return res.json();
   },
 
-  async getAiHistory(userId = 1): Promise<{ history: any[] }> {
-    const res = await fetch(`${API_BASE}/ai/history?user_id=${userId}`);
+  async getAiHistory(): Promise<{ history: any[] }> {
+    const res = await fetch(`${API_BASE}/ai/history`, {
+      headers: authHeaders()
+    });
     if (!res.ok) throw new Error('Failed to fetch AI chat history');
     return res.json();
   }

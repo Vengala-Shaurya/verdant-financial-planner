@@ -43,7 +43,7 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
 
   const fetchActivePlan = async () => {
     try {
-      const res = await api.getActivePlan(1);
+      const res = await api.getActivePlan();
       setActivePlan(res.plan);
       setRevisions(res.revisions);
       if (!generatedPlan && res.plan) {
@@ -78,7 +78,7 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
     }
 
     try {
-      const res = await api.generatePlan(1);
+      const res = await api.generatePlan();
       setGeneratedPlan(res.plan);
     } catch (err: any) {
       alert('Plan generation failed: ' + err.message);
@@ -90,7 +90,7 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
   const handleSavePlan = async () => {
     if (!generatedPlan) return;
     try {
-      await api.savePlan(1, generatedPlan);
+      await api.savePlan(generatedPlan);
       setSaveSuccess(true);
       await fetchActivePlan();
       onDataChanged();

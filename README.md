@@ -21,7 +21,7 @@ The repository comes configured with independent frontend and backend services:
 ```bash
 # In the repository root:
 source venv/bin/activate
-python backend/app.py
+PYTHONPATH=backend python backend/app.py
 ```
 *Backend runs on `http://localhost:5001` with SQLite database initialized at `backend/verdant.db`.*
 
@@ -35,83 +35,66 @@ npm run dev
 
 ---
 
-## 2. Academic Demonstration Workflow (PT1 Review)
+## 2. Authentication & Separate Pathways
 
-VERDANT includes an integrated academic demo seed account (**Arjun Verma**) calibrated with the baseline metrics specified in the project requirements:
-- **Monthly Income:** ₹50,000
-- **Fixed Essential Needs:** ₹15,000
-- **Variable Expenses:** ₹10,000
-- **Debt Obligations:** ₹3,000
-- **Existing Savings:** ₹40,000
-- **Verified Net Monthly Surplus:** **₹22,000** (44% savings rate)
+VERDANT features two completely separate ways to enter the application:
 
-### Demonstration Step-by-Step:
-1. **Welcome Screen (`http://localhost:3000`):**
-   - Click **"Build My Savings Plan"** or **"Enter Ledger"**.
-2. **Module 1 & 5: The Living Ledger Dashboard (`/dashboard`):**
-   - Inspect the verified inflow/outflow metrics, cash-flow waterfall chart, and live audit trail.
-3. **Module 2: The Expense Ledger (`/expenses`):**
-   - Click **"Record New Outflow"**. Enter an amount (e.g., `₹1,200`), select category (e.g., `Food`), and commit.
-   - Notice how category breakdown and net monthly surplus recalculate immediately.
-4. **Module 3: Financial Goals (`/goals`):**
-   - Review the 3 seeded goals (*Emergency Cushion*, *Executive AI Certification*, *Autumn Travel & Trek*).
-   - Click **"+ Add Savings"** on any goal and record a contribution.
-   - Try creating a goal with an unrealistic deadline to observe the surplus capacity warning.
-5. **Module 4: AI-Assisted Strategic Savings Plan (`/plan`):**
-   - Click **"Regenerate Plan"**.
-   - Watch the visible **7-stage mathematical analysis experience** in action.
-   - Review the priority goal allocation matrix, 12-month forward cumulative roadmap, and editorial commentary.
-   - Click **"Save & Activate Plan"** to commit it to the persistent SQLite ledger.
-6. **Module 5: Plan Adjustment & Comparison Diff:**
-   - Navigate to **"Financial Profile"** (`/profile`).
-   - Change Variable Expenses from `10,000` to `12,000` and save.
-   - Return to **"AI Savings Plan"** and regenerate.
-   - Notice the **Plan Adjustment Diff banner** clearly showing that surplus changed by `-₹2,000` and explaining how goal allocation timelines shifted.
-7. **Module Documentation & Methodology (`/methodology`):**
-   - Review the complete PPT methodology, mathematical equations, and architectural pipeline documentation directly inside the UI.
+### A. Academic Demo Account — Arjun Verma
+- Accessible via the **"Continue as Arjun Verma"** button on the Auth Page.
+- Dedicated 1-click entry to the calibrated academic baseline:
+  - Monthly Income: **₹50,000**
+  - Fixed Outflows: **₹15,000**
+  - Variable Outflows: **₹10,000**
+  - Separate Debt Obligations: **₹3,000**
+  - Existing Liquid Savings: **₹40,000**
+  - Verified Net Monthly Surplus: **₹22,000** (44% potential savings rate)
+  - Emergency Runway: **1.6 Months**
+- Clearly labeled as the **Academic Demo Profile**.
+- Quick demo reset mechanism in the sidebar is restricted strictly to Arjun's data.
+
+### B. Personal Accounts & Guided Onboarding
+- **Clean Registration:** Users register with Name, Email, and Password. Email uniqueness is strictly enforced with case-insensitive comparison (`LOWER(email)`).
+- **PBKDF2 Password Hashing & Signed JWTs:** Passwords are never stored in plaintext. JWTs are passed in `Authorization: Bearer <token>` headers or secure cookies.
+- **Guided 4-Step Onboarding:** First-time personal users are guided through:
+  1. *Identity & Currency Selection* (INR, USD, EUR, GBP)
+  2. *Cash-Flow Fundamentals* (take-home income, fixed/variable obligations, liquid cushion, debt)
+  3. *Initial Milestone Setup* (custom or templated goals)
+  4. *Review & Synthesis* (immediate surplus verification and plan compilation)
+- **Zero Inheritance Guarantee:** Newly registered personal accounts start completely clean. Arjun Verma's demo expenses, goals, or plans are **never** seeded or shown inside a personal user's dashboard.
 
 ---
 
-## 3. Technology Stack & Directory Structure
+## 3. Strict User-Level Data Isolation
 
-```
-Personalized Savings PROJECT/
-├── backend/
-│   ├── app.py                      # Flask entry point with CORS & route registration
-│   ├── models/
-│   │   ├── db.py                   # SQLite schema (users, expenses, goals, plans, notifications)
-│   │   └── seed_data.py            # Academic demo seeder (Arjun Verma ₹50k/₹22k profile)
-│   ├── routes/
-│   │   ├── profile_routes.py       # Auth & profile management
-│   │   ├── expense_routes.py       # Ledger transaction CRUD & category breakdown
-│   │   ├── goal_routes.py          # Goal management & contribution logger
-│   │   ├── plan_routes.py          # Savings plan generation & comparison diffing
-│   │   └── dashboard_routes.py     # Aggregated analytics & notifications
-│   ├── services/
-│   │   ├── analysis_engine.py      # Deterministic waterfall, score weighting, & 12-mo roadmap
-│   │   └── ai_service.py           # Hybrid OpenAI / deterministic editorial synthesis engine
-│   ├── validators/
-│   │   └── schemas.py              # Strict payload bounds and type validation
-│   └── tests/
-│       └── test_financial_engine.py # Automated mathematical constraint test suite
-│
-├── frontend/
-│   ├── src/
-│   │   ├── components/             # Sidebar, NotificationsDrawer, Reusable UI
-│   │   ├── pages/                  # Welcome, Dashboard, Expenses, Goals, Plan, Profile, Methodology
-│   │   ├── services/api.ts         # Type-safe API client
-│   │   ├── types/index.ts          # Shared TypeScript interfaces
-│   │   ├── App.tsx                 # Main application state and routing
-│   │   └── index.css               # "The Living Ledger" design tokens & typography
-│   ├── index.html                  # Editorial typography (Instrument Serif, Plus Jakarta Sans, JetBrains Mono)
-│   └── vite.config.ts              # Vite configuration with Tailwind CSS and proxy
-└── README.md
-```
+Every private API endpoint enforces `@require_auth` and derives user identity solely from the server-verified session (`g.current_user['id']`):
+- `/api/expenses/` — Read/Write scoped to current user.
+- `/api/goals/` — Goals, contributions, and progress scoped to current user.
+- `/api/plans/` — Deterministic waterfall math uses current user's profile and goals.
+- `/api/dashboard/` — Overview metrics and notifications scoped to current user.
+- `/api/ai/` — Plan explanations, spending insights, and Ask VERDANT chat history scoped to current user.
+
+Cross-user access attempts result in `404 Not Found / Access Denied`.
 
 ---
 
-## 4. Engineering Principles & AI Distinction
+## 4. The Three AI Features (Authenticated & Scoped)
 
-- **Zero Numerical Hallucination:** The deterministic financial calculation engine in `backend/services/analysis_engine.py` guarantees that total goal allocations never exceed verified net surplus.
-- **LLM Contextual Synthesis:** The LLM API (or calibrated fallback) is responsible strictly for behavioral analysis, risk mitigation, and executive commentary—never overriding verified mathematical constraints.
-- **No External Paid Dependencies Required:** Works out of the box on any student laptop.
+1. **AI Feature A: Personalised Savings-Plan Explanations (`/api/ai/plan-insights`)**
+   - Synthesizes qualitative insights, allocation rationales, and 30-day action items based on the user's verified surplus and deterministic plan.
+2. **AI Feature B: Personalised Spending Insights (`/api/ai/spending-insights`)**
+   - Audits the user's ledger transactions to surface category velocity, large outflows (≥ ₹5,000), and discretionary trim opportunities.
+3. **AI Feature C: Ask VERDANT Conversational What-If Simulation (`/api/ai/ask`, `/api/ai/history`)**
+   - Chat assistant capable of parsing natural language hypothetical scenarios (e.g., *"What if my income increases by 10,000?"*), simulating the recalculation in Python without altering persistent database records.
+   - Includes automatic deterministic fallback when OpenAI API keys are not configured.
+
+---
+
+## 5. Automated Test Suite
+
+Run the full automated test suite covering financial calculations, AI fallbacks, authentication, duplicate rejection, and cross-user data isolation:
+
+```bash
+PYTHONPATH=.:backend ./venv/bin/python -m unittest discover -s backend/tests
+```
+
+Results: **13 tests pass (100% success rate)**.

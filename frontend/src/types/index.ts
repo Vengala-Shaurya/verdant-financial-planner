@@ -9,6 +9,9 @@ export interface UserProfile {
   existing_savings: number;
   debt_obligations: number;
   preferred_savings: number;
+  debt_in_fixed?: number | boolean;
+  is_onboarded?: number | boolean;
+  is_demo?: number | boolean;
 }
 
 export interface FinancialHealth {

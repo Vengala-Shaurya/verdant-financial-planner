@@ -68,7 +68,7 @@ export const ExpensePage: React.FC<ExpensePageProps> = ({ currency = '₹', onDa
     try {
       setLoading(true);
       const catParam = selectedCategory === 'All' ? undefined : selectedCategory;
-      const res = await api.getExpenses(1, catParam, searchQuery || undefined);
+      const res = await api.getExpenses(catParam, searchQuery || undefined);
       setExpenses(res.expenses);
       setBreakdown(res.category_breakdown);
       setTotalSpent(res.total_spent);
@@ -82,7 +82,7 @@ export const ExpensePage: React.FC<ExpensePageProps> = ({ currency = '₹', onDa
   const fetchAiSpendingInsights = async () => {
     try {
       setInsightsLoading(true);
-      const res = await api.getSpendingInsights(1);
+      const res = await api.getSpendingInsights();
       setSpendingInsights(res.spending_insights);
     } catch (err) {
       console.error('Failed to load AI spending insights', err);

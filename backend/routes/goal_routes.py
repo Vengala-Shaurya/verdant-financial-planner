@@ -1,24 +1,25 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from models.db import get_db_connection
 from validators.schemas import validate_goal
+from validators.auth import require_auth
 from datetime import datetime, date
 
 goal_bp = Blueprint('goals', __name__)
 
 @goal_bp.route('/', methods=['GET'])
+@require_auth
 def get_goals():
-    user_id = request.args.get('user_id', 1, type=int)
+    user_id = g.current_user['id']
     conn = get_db_connection()
     goals = conn.execute("SELECT * FROM goals WHERE user_id = ? ORDER BY is_completed ASC, priority DESC, id ASC", (user_id,)).fetchall()
     
-    # Enrich with dynamic calculations (remaining gap, completion %, required monthly)
     today = date.today()
     enriched = []
     total_target = 0.0
     total_saved = 0.0
     
-    for g in goals:
-        d = dict(g)
+    for g_row in goals:
+        d = dict(g_row)
         tgt = float(d['target_amount'])
         curr = float(d['current_amount'])
         gap = max(0.0, tgt - curr)
@@ -51,18 +52,19 @@ def get_goals():
             'total_target': round(total_target, 2),
             'total_saved': round(total_saved, 2),
             'overall_progress_pct': round((total_saved / total_target * 100), 1) if total_target > 0 else 0.0,
-            'active_goals_count': len([g for g in enriched if not g['is_completed']])
+            'active_goals_count': len([g_item for g_item in enriched if not g_item['is_completed']])
         }
     })
 
 @goal_bp.route('/', methods=['POST'])
+@require_auth
 def add_goal():
     data = request.get_json() or {}
     errors = validate_goal(data)
     if errors:
         return jsonify({'errors': errors}), 400
         
-    user_id = data.get('user_id', 1)
+    user_id = g.current_user['id']
     name = data['name']
     category = data.get('category', 'Custom')
     target_amount = float(data['target_amount'])
@@ -94,13 +96,20 @@ def add_goal():
     }), 201
 
 @goal_bp.route('/<int:goal_id>', methods=['PUT'])
+@require_auth
 def update_goal(goal_id):
+    user_id = g.current_user['id']
     data = request.get_json() or {}
     errors = validate_goal(data)
     if errors:
         return jsonify({'errors': errors}), 400
         
     conn = get_db_connection()
+    existing = conn.execute("SELECT id FROM goals WHERE id = ? AND user_id = ?", (goal_id, user_id)).fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({'error': 'Goal not found or access denied'}), 404
+
     conn.execute('''
     UPDATE goals SET
         name = ?,
@@ -110,7 +119,7 @@ def update_goal(goal_id):
         target_date = ?,
         priority = ?,
         is_completed = ?
-    WHERE id = ?
+    WHERE id = ? AND user_id = ?
     ''', (
         data['name'],
         data.get('category', 'Custom'),
@@ -119,15 +128,13 @@ def update_goal(goal_id):
         data['target_date'],
         data.get('priority', 'Medium'),
         1 if data.get('is_completed') else 0,
-        goal_id
+        goal_id,
+        user_id
     ))
     conn.commit()
     updated = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
     conn.close()
     
-    if not updated:
-        return jsonify({'error': 'Goal not found'}), 404
-        
     return jsonify({
         'status': 'success',
         'message': 'Goal parameters updated.',
@@ -135,27 +142,28 @@ def update_goal(goal_id):
     })
 
 @goal_bp.route('/<int:goal_id>/contribute', methods=['POST'])
+@require_auth
 def contribute_to_goal(goal_id):
+    user_id = g.current_user['id']
     data = request.get_json() or {}
     amount = float(data.get('amount', 0))
     if amount <= 0:
         return jsonify({'error': 'Contribution amount must be greater than zero'}), 400
         
     conn = get_db_connection()
-    goal = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    goal = conn.execute("SELECT * FROM goals WHERE id = ? AND user_id = ?", (goal_id, user_id)).fetchone()
     if not goal:
         conn.close()
-        return jsonify({'error': 'Goal not found'}), 404
+        return jsonify({'error': 'Goal not found or access denied'}), 404
         
     new_amt = float(goal['current_amount']) + amount
     tgt = float(goal['target_amount'])
     is_completed = 1 if new_amt >= tgt else 0
     
     conn.execute('''
-    UPDATE goals SET current_amount = ?, is_completed = ? WHERE id = ?
-    ''', (new_amt, is_completed, goal_id))
+    UPDATE goals SET current_amount = ?, is_completed = ? WHERE id = ? AND user_id = ?
+    ''', (new_amt, is_completed, goal_id, user_id))
     
-    user_id = goal['user_id']
     if is_completed:
         conn.execute('''
         INSERT INTO notifications (user_id, type, title, message)
@@ -178,9 +186,16 @@ def contribute_to_goal(goal_id):
     })
 
 @goal_bp.route('/<int:goal_id>', methods=['DELETE'])
+@require_auth
 def delete_goal(goal_id):
+    user_id = g.current_user['id']
     conn = get_db_connection()
-    conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
+    existing = conn.execute("SELECT id FROM goals WHERE id = ? AND user_id = ?", (goal_id, user_id)).fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({'error': 'Goal not found or access denied'}), 404
+
+    conn.execute("DELETE FROM goals WHERE id = ? AND user_id = ?", (goal_id, user_id))
     conn.commit()
     conn.close()
     return jsonify({'status': 'success', 'message': 'Goal removed.'})

@@ -1,12 +1,14 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from models.db import get_db_connection
 from validators.schemas import validate_expense
+from validators.auth import require_auth
 
 expense_bp = Blueprint('expenses', __name__)
 
 @expense_bp.route('/', methods=['GET'])
+@require_auth
 def get_expenses():
-    user_id = request.args.get('user_id', 1, type=int)
+    user_id = g.current_user['id']
     category = request.args.get('category')
     search = request.args.get('search')
     
@@ -36,7 +38,8 @@ def get_expenses():
         ORDER BY total DESC
     ''', (user_id,)).fetchall()
     
-    total_spent = conn.execute('SELECT SUM(amount) as total FROM expenses WHERE user_id = ?', (user_id,)).fetchone()['total'] or 0.0
+    total_spent_row = conn.execute('SELECT SUM(amount) as total FROM expenses WHERE user_id = ?', (user_id,)).fetchone()
+    total_spent = total_spent_row['total'] if total_spent_row and total_spent_row['total'] else 0.0
     
     conn.close()
     
@@ -47,13 +50,14 @@ def get_expenses():
     })
 
 @expense_bp.route('/', methods=['POST'])
+@require_auth
 def add_expense():
     data = request.get_json() or {}
     errors = validate_expense(data)
     if errors:
         return jsonify({'errors': errors}), 400
         
-    user_id = data.get('user_id', 1)
+    user_id = g.current_user['id']
     amount = float(data['amount'])
     date_val = data['date']
     category = data['category']
@@ -69,7 +73,7 @@ def add_expense():
     ''', (user_id, amount, date_val, category, description, payment_method, is_essential))
     new_id = cursor.lastrowid
     
-    # Log notification if expense is unusually large (> 5000)
+    # Log notification if expense is unusually large (>= 5000)
     if amount >= 5000:
         cursor.execute('''
         INSERT INTO notifications (user_id, type, title, message)
@@ -87,13 +91,21 @@ def add_expense():
     }), 201
 
 @expense_bp.route('/<int:expense_id>', methods=['PUT'])
+@require_auth
 def update_expense(expense_id):
+    user_id = g.current_user['id']
     data = request.get_json() or {}
     errors = validate_expense(data)
     if errors:
         return jsonify({'errors': errors}), 400
         
     conn = get_db_connection()
+    # Check ownership
+    existing = conn.execute("SELECT id FROM expenses WHERE id = ? AND user_id = ?", (expense_id, user_id)).fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({'error': 'Expense not found or access denied'}), 404
+
     conn.execute('''
     UPDATE expenses SET
         amount = ?,
@@ -102,7 +114,7 @@ def update_expense(expense_id):
         description = ?,
         payment_method = ?,
         is_essential = ?
-    WHERE id = ?
+    WHERE id = ? AND user_id = ?
     ''', (
         data['amount'],
         data['date'],
@@ -110,15 +122,13 @@ def update_expense(expense_id):
         data.get('description', ''),
         data.get('payment_method', 'UPI'),
         1 if data.get('is_essential', True) else 0,
-        expense_id
+        expense_id,
+        user_id
     ))
     conn.commit()
     updated = conn.execute("SELECT * FROM expenses WHERE id = ?", (expense_id,)).fetchone()
     conn.close()
     
-    if not updated:
-        return jsonify({'error': 'Expense not found'}), 404
-        
     return jsonify({
         'status': 'success',
         'message': 'Expense updated.',
@@ -126,9 +136,16 @@ def update_expense(expense_id):
     })
 
 @expense_bp.route('/<int:expense_id>', methods=['DELETE'])
+@require_auth
 def delete_expense(expense_id):
+    user_id = g.current_user['id']
     conn = get_db_connection()
-    conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+    existing = conn.execute("SELECT id FROM expenses WHERE id = ? AND user_id = ?", (expense_id, user_id)).fetchone()
+    if not existing:
+        conn.close()
+        return jsonify({'error': 'Expense not found or access denied'}), 404
+
+    conn.execute("DELETE FROM expenses WHERE id = ? AND user_id = ?", (expense_id, user_id))
     conn.commit()
     conn.close()
     return jsonify({'status': 'success', 'message': 'Expense removed from ledger.'})

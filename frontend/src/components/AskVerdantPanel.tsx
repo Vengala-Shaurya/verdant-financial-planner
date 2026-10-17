@@ -43,7 +43,7 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
 
   const loadHistory = async () => {
     try {
-      const res = await api.getAiHistory(1);
+      const res = await api.getAiHistory();
       if (res.history && res.history.length > 0) {
         setMessages(res.history);
       } else {
@@ -79,7 +79,7 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
     setLoading(true);
 
     try {
-      const res = await api.askVerdant(q, 1);
+      const res = await api.askVerdant(q);
       const aiResp: AskVerdantResponse = res.response;
       const botMsg: ChatMessage = {
         role: 'assistant',

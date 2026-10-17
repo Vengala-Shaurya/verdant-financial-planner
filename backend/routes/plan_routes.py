@@ -1,22 +1,19 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from models.db import get_db_connection
 from services.analysis_engine import generate_savings_plan_data
 from services.ai_service import get_ai_explanation
+from validators.auth import require_auth
 import json
 
 plan_bp = Blueprint('plans', __name__)
 
 @plan_bp.route('/generate', methods=['POST'])
+@require_auth
 def generate_plan():
-    data = request.get_json() or {}
-    user_id = data.get('user_id', 1)
+    user = g.current_user
+    user_id = user['id']
     
     conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not user:
-        conn.close()
-        return jsonify({'error': 'User not found'}), 404
-        
     expenses = conn.execute("SELECT * FROM expenses WHERE user_id = ?", (user_id,)).fetchall()
     goals = conn.execute("SELECT * FROM goals WHERE user_id = ? AND is_completed = 0", (user_id,)).fetchall()
     
@@ -68,16 +65,17 @@ def generate_plan():
     })
 
 @plan_bp.route('/save', methods=['POST'])
+@require_auth
 def save_plan():
+    user_id = g.current_user['id']
     data = request.get_json() or {}
-    user_id = data.get('user_id', 1)
     plan_data = data.get('plan')
     
     if not plan_data:
         return jsonify({'error': 'Plan data is required to save'}), 400
         
     conn = get_db_connection()
-    # Mark old plans as non-active
+    # Mark old plans for this user as non-active
     conn.execute("UPDATE savings_plans SET is_active = 0 WHERE user_id = ?", (user_id,))
     
     fin = plan_data.get('financial_health', {})
@@ -112,8 +110,9 @@ def save_plan():
     })
 
 @plan_bp.route('/active', methods=['GET'])
+@require_auth
 def get_active_plan():
-    user_id = request.args.get('user_id', 1, type=int)
+    user_id = g.current_user['id']
     conn = get_db_connection()
     row = conn.execute("SELECT * FROM savings_plans WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
     

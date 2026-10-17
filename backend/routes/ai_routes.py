@@ -1,32 +1,34 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from models.db import get_db_connection
 from services.ai_service import (
     generate_plan_ai_insights,
     generate_spending_insights,
     answer_financial_query
 )
+from validators.auth import require_auth
 import json
 
 ai_bp = Blueprint('ai', __name__)
 
 @ai_bp.route('/plan-insights', methods=['POST'])
+@require_auth
 def plan_insights():
     """
     AI Feature A: Comprehensive personalized explanations of the active/current savings plan.
+    Strictly scoped to g.current_user.
     """
+    user = g.current_user
+    user_id = user['id']
     data = request.get_json() or {}
-    user_id = data.get('user_id', 1)
     plan_data = data.get('plan')
 
     conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not user:
-        conn.close()
-        return jsonify({'error': 'User not found'}), 404
-
     # If plan not supplied in body, get latest active plan from DB
     if not plan_data:
-        plan_row = conn.execute("SELECT plan_data_json FROM savings_plans WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
+        plan_row = conn.execute(
+            "SELECT plan_data_json FROM savings_plans WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1",
+            (user_id,)
+        ).fetchone()
         if plan_row:
             plan_data = json.loads(plan_row['plan_data_json'])
         else:
@@ -42,18 +44,16 @@ def plan_insights():
     })
 
 @ai_bp.route('/spending-insights', methods=['POST', 'GET'])
+@require_auth
 def spending_insights():
     """
     AI Feature B: Personalized spending audit, category velocity, and outlier analysis.
+    Strictly scoped to g.current_user.
     """
-    user_id = request.args.get('user_id', 1, type=int) if request.method == 'GET' else (request.get_json() or {}).get('user_id', 1)
+    user = g.current_user
+    user_id = user['id']
 
     conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not user:
-        conn.close()
-        return jsonify({'error': 'User not found'}), 404
-
     expenses = conn.execute("SELECT * FROM expenses WHERE user_id = ? ORDER BY date DESC", (user_id,)).fetchall()
     conn.close()
 
@@ -70,29 +70,30 @@ def spending_insights():
     })
 
 @ai_bp.route('/ask', methods=['POST'])
+@require_auth
 def ask_verdant():
     """
     AI Feature C: Contextual conversational financial assistant and hypothetical scenario simulator.
+    Strictly scoped to g.current_user.
     """
+    user = g.current_user
+    user_id = user['id']
     data = request.get_json() or {}
-    user_id = data.get('user_id', 1)
     query = data.get('query', '').strip()
 
     if not query:
         return jsonify({'error': 'Query string cannot be empty'}), 400
 
     conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    if not user:
-        conn.close()
-        return jsonify({'error': 'User not found'}), 404
-
     goals = conn.execute("SELECT * FROM goals WHERE user_id = ? AND is_completed = 0", (user_id,)).fetchall()
     plan_row = conn.execute("SELECT plan_data_json FROM savings_plans WHERE user_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
     active_plan = json.loads(plan_row['plan_data_json']) if plan_row else None
 
-    # Fetch recent conversation history
-    history_rows = conn.execute("SELECT role, content FROM ai_conversations WHERE user_id = ? ORDER BY id ASC LIMIT 10", (user_id,)).fetchall()
+    # Fetch recent conversation history strictly for this user
+    history_rows = conn.execute(
+        "SELECT role, content FROM ai_conversations WHERE user_id = ? ORDER BY id ASC LIMIT 10",
+        (user_id,)
+    ).fetchall()
     conv_history = [dict(h) for h in history_rows]
 
     # Process query
@@ -117,13 +118,17 @@ def ask_verdant():
     })
 
 @ai_bp.route('/history', methods=['GET'])
+@require_auth
 def get_ai_history():
     """
-    Returns recent Ask VERDANT chat history for the user.
+    Returns recent Ask VERDANT chat history strictly for the authenticated user.
     """
-    user_id = request.args.get('user_id', 1, type=int)
+    user_id = g.current_user['id']
     conn = get_db_connection()
-    rows = conn.execute("SELECT id, role, content, scenario_data_json, created_at FROM ai_conversations WHERE user_id = ? ORDER BY id ASC LIMIT 30", (user_id,)).fetchall()
+    rows = conn.execute(
+        "SELECT id, role, content, scenario_data_json, created_at FROM ai_conversations WHERE user_id = ? ORDER BY id ASC LIMIT 30",
+        (user_id,)
+    ).fetchall()
     conn.close()
 
     history = []

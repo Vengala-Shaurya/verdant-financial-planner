@@ -12,7 +12,7 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Users table
+    # Users table with is_onboarded & is_demo flags
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,10 +26,23 @@ def init_db():
         existing_savings REAL DEFAULT 0.0,
         debt_obligations REAL DEFAULT 0.0,
         preferred_savings REAL DEFAULT 0.0,
+        debt_in_fixed INTEGER DEFAULT 0,
+        is_onboarded INTEGER DEFAULT 0,
+        is_demo INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
+
+    # Safe migration: ensure new columns exist if table was already created
+    cursor.execute("PRAGMA table_info(users)")
+    existing_cols = [row['name'] for row in cursor.fetchall()]
+    if 'is_onboarded' not in existing_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_onboarded INTEGER DEFAULT 0")
+    if 'is_demo' not in existing_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_demo INTEGER DEFAULT 0")
+    if 'debt_in_fixed' not in existing_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN debt_in_fixed INTEGER DEFAULT 0")
 
     # Expenses table
     cursor.execute('''
@@ -122,9 +135,16 @@ def init_db():
     )
     ''')
 
+    # Create helpful indexes for performance & isolation
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_expenses_user ON expenses(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_plans_user ON savings_plans(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifs_user ON notifications(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_conv_user ON ai_conversations(user_id)")
+
     conn.commit()
     conn.close()
 
 if __name__ == '__main__':
     init_db()
-    print("Database initialized successfully with ai_conversations & ai_insights at", DB_PATH)
+    print("Database initialized & migrated successfully at", DB_PATH)

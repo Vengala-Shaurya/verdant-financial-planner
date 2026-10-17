@@ -14,99 +14,101 @@ VERDANT is a functional, presentation-ready full-stack web application developed
 A key challenge with AI in financial planning is hallucinations (e.g., allocating more money than available surplus, or double-counting debt obligations). VERDANT resolves this by maintaining a strict **separation of concerns**:
 - **Deterministic Calculation Engine (Python):** Governs all mathematical budgets, surplus constraints, priority weights, and month-by-month compounding simulations.
 - **Contextual LLM Synthesis (OpenAI GPT-4o-mini / Fallback):** Synthesizes qualitative insights, contextual behavioral rationales, and risk mitigation strategies without altering verified numerical allocations.
+- **Strict Data Isolation & Authentication:** Every personal account has its own isolated records in SQLite. Fictional demo records for Arjun Verma remain completely separate and are never seeded or leaked into newly registered accounts.
 
 ---
 
-## 2. Technology Stack & Tools Used
+## 2. Authentication & Data Isolation Architecture
+
+### A. Dual-Mode Entry: Demo vs. Personal
+1. **Academic Demo Account — Arjun Verma:**
+   - Dedicated 1-click entry via `/api/auth/demo-login`.
+   - Seeded with calibrated PT1 presentation baseline:
+     - Monthly Income: **₹50,000**
+     - Fixed Expenses: **₹15,000**
+     - Variable Expenses: **₹10,000**
+     - Separate Debt Obligations: **₹3,000**
+     - Existing Liquid Savings: **₹40,000**
+     - Monthly Net Surplus: **₹22,000** (44% potential savings rate)
+     - Emergency Runway: **1.6 Months**
+   - Labeled clearly with an "Academic Demo Profile" indicator.
+   - Demo resets are restricted exclusively to Arjun's account.
+
+2. **Personal Verified Accounts:**
+   - Case-insensitive email uniqueness constraint (`LOWER(email)`).
+   - Secure PBKDF2 password hashing via `werkzeug.security`.
+   - Signed JWT Bearer tokens with 72-hour expiration, passed in `Authorization: Bearer <token>` headers or secure `verdant_token` cookies.
+   - Clean slate registration: Newly registered accounts start with 0 expenses and 0 goals, never inheriting demo records.
+
+### B. First-Time Personal Onboarding Flow
+Upon registration, if `is_onboarded == 0`, users are directed to a guided 4-step onboarding wizard:
+- **Step 1 (Basic Profile):** Display name and currency preference (INR default).
+- **Step 2 (Monthly Financial Baseline):** Take-home income, fixed expenses, variable expenses, liquid savings, and debt obligations (including whether debt is already part of fixed commitments).
+- **Step 3 (Initial Financial Goal):** Milestone name, category, target amount, existing saved balance, target date, and priority.
+- **Step 4 (Review & Synthesis):** Verifies the computed surplus and triggers deterministic plan generation and persistence before transitioning to the personal dashboard.
+
+### C. Server-Side Scoped Endpoints
+All private endpoints enforce `@require_auth` and derive user identity exclusively from `g.current_user['id']`:
+- `/api/expenses/` (Scoped read, create, update, delete)
+- `/api/goals/` (Scoped read, create, update, delete, contribute)
+- `/api/plans/generate`, `/api/plans/save`, `/api/plans/active` (Scoped financial engine execution)
+- `/api/dashboard/overview`, `/api/dashboard/notifications` (Scoped metrics & alerts)
+- `/api/ai/plan-insights`, `/api/ai/spending-insights`, `/api/ai/ask`, `/api/ai/history` (Scoped prompt synthesis)
+
+Cross-account tampering attempts return `404 Not Found / Access Denied`.
+
+---
+
+## 3. Technology Stack & Tools Used
 
 | Layer / Component | Technology Used | Rationale & Architectural Purpose |
 |---|---|---|
 | **Frontend Framework** | React 19, TypeScript, Vite | Component-driven reactive architecture with sub-second HMR and full type safety. |
 | **Styling & Aesthetics** | Tailwind CSS + Custom CSS Variables | "The Living Ledger" editorial aesthetic inspired by premium wealth journals (Warm Paper `#F6F3EB`, Forest Green `#183D32`, Ink `#202822`, Chartreuse `#D5EE75`, Terracotta `#C66D51`). |
 | **Typography** | Google Fonts (*Instrument Serif*, *Plus Jakarta Sans*, *JetBrains Mono*) | High typographic hierarchy with tabular monospaced numbers for financial figures. |
+| **Authentication** | PyJWT, Werkzeug PBKDF2 Hashing | Signed JWT session tokens with password hashing; server-side `@require_auth` decorator. |
 | **Data Visualisation** | Recharts (ResponsiveContainer, BarChart, AreaChart, Pie) | SVG charts for cash-flow waterfalls, category spend distributions, and 12-month wealth simulation curves. |
-| **Iconography** | Lucide React | Clean vector iconography for financial transactions, drawers, and status indicators. |
 | **Backend Server** | Python 3.12, Flask, Flask-CORS | Modular REST API service handling calculation services, validation, and data serialization. |
-| **Database & Persistence**| SQLite (`verdant.db`) | Embedded relational database with schema foreign keys. Ensures persistent state across user sessions with zero external setup. |
+| **Database & Persistence**| SQLite (`verdant.db`) | Embedded relational database with foreign-key indexes on `user_id`. |
 | **AI Integration** | Hybrid OpenAI API + Deterministic Fallback | LLM API with an automatic, calibrated deterministic editorial wealth engine when no API key is present. |
-| **Quality & Testing** | Python `unittest`, Vite Production Build | Verifies allocation math, surplus ceiling rules, and TypeScript bundle compilation. |
+| **Testing** | Python `unittest` (13 automated tests) | Covers authentication, duplicate rejection, data isolation, onboarding, financial math, and AI fallbacks. |
 
 ---
 
-## 3. What Was Built: The Five Academic Modules
+## 4. The Three AI Features (Authenticated & Scoped)
 
-### Module 1: User and Profile Management
-- **Persistent Profile Schema:** Stores user identity, currency preference, take-home monthly income, fixed essential commitments, variable monthly expenditures, existing liquid savings, debt obligations, and target savings.
-- **Academic Demo Profile (Arjun Verma):** Calibrated with exact presentation values:
-  - Monthly Income: **₹50,000**
-  - Fixed Essential Outflows: **₹15,000**
-  - Variable Outflows: **₹10,000**
-  - Separate Debt Obligations: **₹3,000**
-  - Existing Liquid Savings: **₹40,000**
-  - Initial Net Monthly Surplus: **₹22,000** (44% savings rate)
-  - Emergency Runway: **1.6 Months**
-
-### Module 2: Expense Tracking & Categorisation
-- **Living Ledger Table:** Tabular transaction log with date, category, description, payment method (UPI, Debit, Credit, Net Banking, Cash), and amount.
-- **10-Category Classification:** Housing, Food, Transport, Utilities, Healthcare, Entertainment, Shopping, Debt Payments, Education, Other.
-- **Needs vs. Wants Auditing:** Flags transactions as Essential (Needs - 50% benchmark) or Discretionary (Wants - 30% benchmark).
-- **CRUD Operations:** Real-time expense addition, modification, and deletion with instant dashboard recalculation.
-
-### Module 3: Financial Goal Management
-- **Multi-Horizon Portfolios:** Emergency Fund, Higher Education, Travel, Electronics, Debt Clearance, Custom.
-- **Automated Mathematical Gap Analysis:** Computes remaining capital gap, progress percentage, months remaining, and ideal monthly velocity.
-- **Surplus Capacity Guard:** Flags milestones when total required monthly contributions exceed verified surplus.
-- **Contribution Logger:** Allows logging ad-hoc savings deposits into goals, triggering celebratory completion notifications.
-
-### Module 4: AI-Assisted Strategic Savings Plan Generator (The Core Feature)
-- **Guided 7-Stage Analysis Pipeline:** Visibly walks the user through data collection, spending velocity analysis, surplus calculation, priority weighting, deterministic allocation, AI risk analysis, and 12-month simulation.
-- **Priority-Weighted Waterfall Allocation:**
-  $$\text{Score}_i = \text{PriorityWeight}_i \times \left(\frac{10}{\text{MonthsRemaining}_i + 1}\right)$$
-  - High Priority = 3x (Emergency Funds receive +2 extra emergency weight), Medium = 2x, Low = 1x.
-  - Guaranteed: $\sum \text{Allocated}_i \le \text{Monthly Surplus}$.
-- **12-Month Cumulative Wealth Simulation Roadmap:** Month-by-month portfolio trajectory showing balance growth for each individual goal.
-- **Tactical Action Items:** Suggests discretionary expense cuts and concrete 30-day next steps.
-- **Persistent Plan Storage:** Enables saving, activating, and recalling generated strategies.
-
-### Module 5: Savings Progress Monitoring & Plan Adjustment
-- **Plan Adjustment Diff Engine:** Compares revisions. If the user changes an income or expense parameter, the engine quantifies the exact surplus delta (e.g. $-\text{₹}2,000$), delays in target dates, and allocation shifts.
-- **In-App Notifications Drawer:** Persistent alert log for budget thresholds, significant expenditures, and milestone accomplishments.
+1. **AI Feature A: Personalised Savings-Plan Explanations (`/api/ai/plan-insights`)**
+   - Retrieves the user's active deterministic plan and provides qualitative breakdowns of goal feasibility, 30-day behavioral steps, and discretionary reductions.
+2. **AI Feature B: Personalised Spending Insights (`/api/ai/spending-insights`)**
+   - Audits the user's actual ledger transactions to detect velocity trends, category concentration, and large outflows (threshold ≥ ₹5,000).
+3. **AI Feature C: Ask VERDANT Conversational What-If Simulation (`/api/ai/ask`, `/api/ai/history`)**
+   - Chat assistant capable of parsing natural language hypothetical scenarios (e.g., *"What if my income increases by 10,000?"*), simulating the recalculation in Python without altering persistent database records.
 
 ---
 
-## 4. Key Mathematical Formulations
+## 5. Verification & Test Execution Results
 
-1. **Monthly Net Surplus:**
-   $$\text{Surplus} = \text{Monthly Income} - (\text{Fixed Expenses} + \text{Variable Expenses}) - \text{Debt Obligations}$$
-2. **Effective Savings Rate:**
-   $$\text{Savings Rate} (\%) = \left(\frac{\text{Recommended Monthly Savings}}{\text{Monthly Income}}\right) \times 100$$
-3. **Emergency Runway:**
-   $$\text{Runway (Months)} = \frac{\text{Existing Savings}}{\text{Total Monthly Expenses}}$$
-4. **Goal Monthly Demand:**
-   $$\text{Required Monthly} = \frac{\text{Target Amount} - \text{Current Amount}}{\max(1, \text{Months to Target Date})}$$
+All 13 automated backend tests and the TypeScript production build pass:
 
----
+```bash
+# 1. Automated Test Suite (13 tests)
+PYTHONPATH=.:backend ./venv/bin/python -m unittest discover -s backend/tests
+----------------------------------------------------------------------
+Ran 13 tests in 0.546s
+OK
 
-## 5. What Could Be Improved Upon (Future Scope)
+# 2. Frontend Production Bundle
+npm run build
+✓ 2506 modules transformed.
+dist/index.html                   1.13 kB
+dist/assets/index-Cx24ZEpH.css   33.02 kB
+dist/assets/index-BzQnFmOh.js   750.67 kB
+✓ built in 432ms
+```
 
-While VERDANT satisfies and exceeds all PT1 academic requirements, the following enhancements represent natural evolutions for commercial or post-academic deployment:
-
-1. **Automated Bank Feed Integration (Account Aggregator / Plaid / Setu):**
-   - *Current State:* Transactions and baseline amounts are user-logged or seeded.
-   - *Improvement:* Ingest real-time bank statements via India's RBI Account Aggregator framework or Plaid/SaltEdge APIs, eliminating manual transaction logging.
-
-2. **Inflation & Dynamic Multi-Asset Yield Modeling:**
-   - *Current State:* Assumes constant purchasing power across the 12-month simulation.
-   - *Improvement:* Introduce inflation rate sliders (e.g., 6% CPI) and asset-class expected returns (Liquid Funds, Fixed Deposits, Index Mutual Funds, Gold) to model real post-tax returns.
-
-3. **Machine Learning Merchant Categorization (Local NLP / Embeddings):**
-   - *Current State:* Categorization relies on user selection and keyword matching.
-   - *Improvement:* Implement a lightweight local embedding model (e.g., FastText or Sentence-Transformers) to automatically normalize messy transaction SMS/UPI strings (e.g., `UPI/239102/SWIGGY_BANGALORE` $\rightarrow$ `Food`).
-
-4. **Multi-User Authentication & JWT Security:**
-   - *Current State:* Built around a 1-click academic demo profile with scrypt password hashing.
-   - *Improvement:* Implement JWT bearer token authentication, OAuth2 (Google/GitHub login), role-based permissions, and end-to-end payload encryption for production multi-tenancy.
-
-5. **External Push Alerts & Messaging Bots:**
-   - *Current State:* Notifications are presented via an in-app drawer.
-   - *Improvement:* Connect to Web Push, Telegram, or WhatsApp Business APIs to send proactive weekly spending digests and mid-month budget warnings.
+### Verified Scenarios:
+1. **Demo Login:** Arjun Verma persona loads instantly with ₹22k surplus, 44% savings rate, and sample records.
+2. **Sign Out:** Application clears session and returns cleanly to Auth Page.
+3. **Registration & Duplicate Rejection:** Case-insensitive duplicate email detection correctly blocks collision.
+4. **Onboarding Wizard:** First-time personal users complete the 4-step wizard; data is persisted and an initial plan is synthesized.
+5. **Data Isolation:** User B cannot read, update, or contribute to User A's expenses or goals (returns 404). Personal users never see demo records.
