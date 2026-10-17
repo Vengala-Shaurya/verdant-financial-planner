@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { NotificationsDrawer } from './components/NotificationsDrawer';
+import { AskVerdantPanel } from './components/AskVerdantPanel';
 import { DashboardPage } from './pages/DashboardPage';
 import { ExpensePage } from './pages/ExpensePage';
 import { GoalPage } from './pages/GoalPage';
@@ -16,6 +17,7 @@ export function App() {
   const [dashboardData, setDashboardData] = useState<DashboardOverview | null>(null);
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [isNotifOpen, setIsNotifOpen] = useState<boolean>(false);
+  const [isAskVerdantOpen, setIsAskVerdantOpen] = useState<boolean>(false);
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
 
   const loadData = async () => {
@@ -67,7 +69,6 @@ export function App() {
     setRefreshTrigger((prev) => prev + 1);
   };
 
-  // If user chooses welcome screen
   if (currentTab === 'welcome') {
     return (
       <WelcomePage
@@ -88,6 +89,7 @@ export function App() {
         unreadCount={unreadCount}
         onOpenNotifications={() => setIsNotifOpen(true)}
         onQuickResetDemo={handleQuickResetDemo}
+        onOpenAskVerdant={() => setIsAskVerdantOpen(true)}
         userName={dashboardData?.user?.name || 'Arjun Verma'}
       />
 
@@ -121,6 +123,7 @@ export function App() {
           <PlanPage
             currency="₹"
             onDataChanged={() => setRefreshTrigger((prev) => prev + 1)}
+            onOpenAskVerdant={() => setIsAskVerdantOpen(true)}
           />
         )}
 
@@ -143,6 +146,14 @@ export function App() {
         notifications={notifications}
         onMarkRead={handleMarkNotifRead}
         onMarkAllRead={handleMarkAllNotifRead}
+      />
+
+      {/* Ask VERDANT Contextual Panel */}
+      <AskVerdantPanel
+        isOpen={isAskVerdantOpen}
+        onClose={() => setIsAskVerdantOpen(false)}
+        currency="₹"
+        onRefreshDashboard={() => setRefreshTrigger((prev) => prev + 1)}
       />
     </div>
   );

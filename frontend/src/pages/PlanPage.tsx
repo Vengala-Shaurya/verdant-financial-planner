@@ -11,7 +11,9 @@ import {
   ChevronRight,
   Calendar,
   Layers,
-  Cpu
+  Cpu,
+  ListChecks,
+  AlertOctagon
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -28,9 +30,10 @@ import { api } from '../services/api';
 interface PlanPageProps {
   currency: string;
   onDataChanged: () => void;
+  onOpenAskVerdant?: () => void;
 }
 
-export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChanged }) => {
+export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChanged, onOpenAskVerdant }) => {
   const [activePlan, setActivePlan] = useState<SavingsPlan | null>(null);
   const [generatedPlan, setGeneratedPlan] = useState<SavingsPlan | null>(null);
   const [revisions, setRevisions] = useState<any[]>([]);
@@ -59,7 +62,6 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
     setIsGenerating(true);
     setSaveSuccess(false);
 
-    // Visible 7-stage generation experience as required by academic presentation
     const steps = [
       'Collecting and validating financial profiles...',
       'Analyzing fixed obligations vs discretionary velocity...',
@@ -72,7 +74,7 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
 
     for (let i = 0; i < steps.length; i++) {
       setGenerationStep(i);
-      await new Promise((r) => setTimeout(r, 450));
+      await new Promise((r) => setTimeout(r, 400));
     }
 
     try {
@@ -99,6 +101,7 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
   };
 
   const displayPlan = generatedPlan || activePlan;
+  const aiSynth = displayPlan?.ai_synthesis;
 
   return (
     <div className="space-y-8 animate-fade-in pb-16">
@@ -117,6 +120,16 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
         </div>
 
         <div className="flex items-center space-x-3">
+          {onOpenAskVerdant && (
+            <button
+              onClick={onOpenAskVerdant}
+              className="px-3.5 py-2.5 border border-[#183D32] bg-[#FFFEFA] text-[#183D32] hover:bg-[#D5EE75]/20 rounded-sm font-semibold text-xs transition-colors flex items-center space-x-1.5"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-[#183D32]" />
+              <span>Ask VERDANT / What-If</span>
+            </button>
+          )}
+
           <button
             onClick={handleGeneratePlan}
             disabled={isGenerating}
@@ -288,9 +301,9 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
             </div>
           </div>
 
-          {/* AI Strategic Synthesis & Commentary Section */}
-          <div className="bg-[#FFFEFA] border border-[#D8DCD1] p-6 subtle-paper-shadow">
-            <div className="flex items-center justify-between border-b border-[#D8DCD1] pb-3 mb-4">
+          {/* AI Feature A: Strategic Synthesis & Allocation Rationales Section */}
+          <div className="bg-[#FFFEFA] border border-[#D8DCD1] p-6 subtle-paper-shadow space-y-4">
+            <div className="flex items-center justify-between border-b border-[#D8DCD1] pb-3">
               <div className="flex items-center space-x-2">
                 <Sparkles className="w-4 h-4 text-[#183D32]" />
                 <h3 className="font-editorial text-2xl font-semibold text-[#183D32]">
@@ -298,12 +311,43 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
                 </h3>
               </div>
               <span className="text-[10px] font-mono-num px-2 py-0.5 rounded-xs bg-[#F6F3EB] text-[#183D32] border border-[#D8DCD1]">
-                {displayPlan.ai_synthesis?.provider || 'Deterministic Engine'}
+                {aiSynth?.provider || 'Deterministic Engine'}
               </span>
             </div>
 
             <div className="prose text-xs text-[#202822]/85 leading-relaxed space-y-3 whitespace-pre-line font-light">
-              {displayPlan.ai_synthesis?.narrative}
+              {aiSynth?.narrative}
+            </div>
+
+            {/* Structured AI Breakdown: Rationales, Risks, and Observations */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              {aiSynth?.allocation_rationales && aiSynth.allocation_rationales.length > 0 && (
+                <div className="p-3 bg-[#F6F3EB] border border-[#D8DCD1] rounded-xs space-y-1.5">
+                  <span className="text-[10px] font-mono-num uppercase tracking-wider text-[#183D32] font-bold block flex items-center space-x-1">
+                    <ListChecks className="w-3.5 h-3.5 text-[#183D32]" />
+                    <span>Allocation Rationales</span>
+                  </span>
+                  <ul className="space-y-1 text-xs text-[#202822]/80">
+                    {aiSynth.allocation_rationales.map((r, i) => (
+                      <li key={i}>• {r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {aiSynth?.risks_and_tradeoffs && aiSynth.risks_and_tradeoffs.length > 0 && (
+                <div className="p-3 bg-[#F6F3EB] border border-[#D8DCD1] rounded-xs space-y-1.5">
+                  <span className="text-[10px] font-mono-num uppercase tracking-wider text-[#C66D51] font-bold block flex items-center space-x-1">
+                    <AlertOctagon className="w-3.5 h-3.5 text-[#C66D51]" />
+                    <span>Identified Risks & Trade-Offs</span>
+                  </span>
+                  <ul className="space-y-1 text-xs text-[#202822]/80">
+                    {aiSynth.risks_and_tradeoffs.map((r, i) => (
+                      <li key={i}>• {r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div className="mt-4 pt-3 border-t border-[#D8DCD1]/60 text-[10px] text-[#202822]/50 font-mono-num">
@@ -467,7 +511,7 @@ export const PlanPage: React.FC<PlanPageProps> = ({ currency = '₹', onDataChan
               </h3>
 
               <div className="space-y-2.5">
-                {displayPlan.actions_next_30_days.map((act, idx) => (
+                {(aiSynth?.action_plan_30_days || displayPlan.actions_next_30_days).map((act, idx) => (
                   <div key={idx} className="flex items-start space-x-2.5 text-xs text-[#202822]">
                     <div className="w-4 h-4 rounded-full bg-[#183D32] text-[#D5EE75] flex items-center justify-center font-mono-num text-[10px] shrink-0 mt-0.5">
                       {idx + 1}

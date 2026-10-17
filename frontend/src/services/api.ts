@@ -196,5 +196,38 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId })
     });
+  },
+
+  // AI Integration Features
+  async getPlanInsights(userId = 1, plan?: SavingsPlan): Promise<{ insights: any }> {
+    const res = await fetch(`${API_BASE}/ai/plan-insights`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, plan })
+    });
+    if (!res.ok) throw new Error('Failed to fetch AI plan insights');
+    return res.json();
+  },
+
+  async getSpendingInsights(userId = 1): Promise<{ spending_insights: any }> {
+    const res = await fetch(`${API_BASE}/ai/spending-insights?user_id=${userId}`);
+    if (!res.ok) throw new Error('Failed to fetch spending insights');
+    return res.json();
+  },
+
+  async askVerdant(query: string, userId = 1): Promise<{ response: any }> {
+    const res = await fetch(`${API_BASE}/ai/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, query })
+    });
+    if (!res.ok) throw new Error('Failed to query Ask VERDANT');
+    return res.json();
+  },
+
+  async getAiHistory(userId = 1): Promise<{ history: any[] }> {
+    const res = await fetch(`${API_BASE}/ai/history?user_id=${userId}`);
+    if (!res.ok) throw new Error('Failed to fetch AI chat history');
+    return res.json();
   }
 };

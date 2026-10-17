@@ -14,6 +14,7 @@ from routes.expense_routes import expense_bp
 from routes.goal_routes import goal_bp
 from routes.plan_routes import plan_bp
 from routes.dashboard_routes import dash_bp
+from routes.ai_routes import ai_bp
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -24,6 +25,7 @@ app.register_blueprint(expense_bp, url_prefix='/api/expenses')
 app.register_blueprint(goal_bp, url_prefix='/api/goals')
 app.register_blueprint(plan_bp, url_prefix='/api/plans')
 app.register_blueprint(dash_bp, url_prefix='/api/dashboard')
+app.register_blueprint(ai_bp, url_prefix='/api/ai')
 
 @app.route('/api/health', methods=['GET'])
 def health():

@@ -277,7 +277,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ data, onNavigateTa
 
           <div className="mt-6 pt-4 border-t border-[#D8DCD1] bg-[#FBF9F4] p-3 text-xs leading-relaxed text-[#202822]/80">
             <span className="font-semibold text-[#183D32]">Planning Insight: </span>
-            {financial_health.savings_rate >= 30
+            {(financial_health.potential_surplus_rate ?? financial_health.savings_rate ?? 0) >= 30
               ? 'Your high savings rate allows aggressive parallel milestone funding.'
               : 'Discretionary outflows can be pruned to protect goal deadlines.'}
           </div>

@@ -8,9 +8,13 @@ import {
   Search,
   CheckCircle2,
   AlertTriangle,
-  ArrowUpDown
+  Sparkles,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronUp,
+  TrendingDown
 } from 'lucide-react';
-import { ExpenseItem } from '../types';
+import { ExpenseItem, SpendingInsightsResult } from '../types';
 import { api } from '../services/api';
 
 interface ExpensePageProps {
@@ -37,6 +41,11 @@ export const ExpensePage: React.FC<ExpensePageProps> = ({ currency = '₹', onDa
   const [breakdown, setBreakdown] = useState<{ category: string; total: number; count: number }[]>([]);
   const [totalSpent, setTotalSpent] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
+
+  // AI Feature B State
+  const [spendingInsights, setSpendingInsights] = useState<SpendingInsightsResult | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState<boolean>(false);
+  const [showAiInsights, setShowAiInsights] = useState<boolean>(true);
 
   // Filters
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -70,9 +79,25 @@ export const ExpensePage: React.FC<ExpensePageProps> = ({ currency = '₹', onDa
     }
   };
 
+  const fetchAiSpendingInsights = async () => {
+    try {
+      setInsightsLoading(true);
+      const res = await api.getSpendingInsights(1);
+      setSpendingInsights(res.spending_insights);
+    } catch (err) {
+      console.error('Failed to load AI spending insights', err);
+    } finally {
+      setInsightsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchExpenses();
   }, [selectedCategory, searchQuery]);
+
+  useEffect(() => {
+    fetchAiSpendingInsights();
+  }, []);
 
   const handleOpenAdd = () => {
     setEditingExpense(null);
@@ -107,6 +132,7 @@ export const ExpensePage: React.FC<ExpensePageProps> = ({ currency = '₹', onDa
     try {
       await api.deleteExpense(id);
       await fetchExpenses();
+      fetchAiSpendingInsights();
       onDataChanged();
     } catch (err: any) {
       alert('Failed to delete expense: ' + err.message);
@@ -150,6 +176,7 @@ export const ExpensePage: React.FC<ExpensePageProps> = ({ currency = '₹', onDa
       }
       setIsModalOpen(false);
       await fetchExpenses();
+      fetchAiSpendingInsights();
       onDataChanged();
     } catch (err: any) {
       setFormError(err.message || 'Operation failed');
@@ -172,14 +199,83 @@ export const ExpensePage: React.FC<ExpensePageProps> = ({ currency = '₹', onDa
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="px-4 py-2.5 bg-[#183D32] text-[#D5EE75] hover:bg-[#183D32]/90 rounded-sm font-semibold text-xs transition-colors flex items-center space-x-1.5 shadow-xs"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Record New Outflow</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={fetchAiSpendingInsights}
+            disabled={insightsLoading}
+            className="px-3.5 py-2.5 border border-[#183D32] bg-[#FFFEFA] text-[#183D32] hover:bg-[#D5EE75]/20 rounded-sm font-semibold text-xs transition-colors flex items-center space-x-1.5"
+          >
+            <Sparkles className={`w-3.5 h-3.5 text-[#183D32] ${insightsLoading ? 'animate-spin' : ''}`} />
+            <span>Audit Spending AI</span>
+          </button>
+          <button
+            onClick={handleOpenAdd}
+            className="px-4 py-2.5 bg-[#183D32] text-[#D5EE75] hover:bg-[#183D32]/90 rounded-sm font-semibold text-xs transition-colors flex items-center space-x-1.5 shadow-xs"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Record New Outflow</span>
+          </button>
+        </div>
       </div>
+
+      {/* AI Feature B: Personalised Spending Insights Card */}
+      {spendingInsights && (
+        <div className="bg-[#FFFEFA] border border-[#183D32]/30 subtle-paper-shadow rounded-sm overflow-hidden">
+          <div
+            onClick={() => setShowAiInsights(!showAiInsights)}
+            className="p-4 bg-[#FBF9F4] border-b border-[#D8DCD1] flex items-center justify-between cursor-pointer hover:bg-[#F6F3EB] transition-colors"
+          >
+            <div className="flex items-center space-x-2">
+              <Sparkles className="w-4 h-4 text-[#183D32]" />
+              <h3 className="font-editorial text-lg font-semibold text-[#183D32]">
+                Personalised Spending Insights & Velocity Audit
+              </h3>
+              <span className="text-[10px] font-mono-num px-2 py-0.5 rounded-xs bg-[#FFFEFA] text-[#183D32] border border-[#D8DCD1]">
+                {spendingInsights.provider}
+              </span>
+            </div>
+            {showAiInsights ? <ChevronUp className="w-4 h-4 text-[#202822]/60" /> : <ChevronDown className="w-4 h-4 text-[#202822]/60" />}
+          </div>
+
+          {showAiInsights && (
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-[#202822]/90 leading-relaxed font-medium">
+                {spendingInsights.spending_assessment}
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <div className="p-3 bg-[#F6F3EB] rounded-sm border border-[#D8DCD1] space-y-2">
+                  <span className="text-[10px] font-mono-num uppercase tracking-wider text-[#183D32] font-bold block">
+                    Key Ledger Observations
+                  </span>
+                  <ul className="space-y-1.5 text-xs text-[#202822]/80">
+                    {spendingInsights.key_observations.map((obs, idx) => (
+                      <li key={idx} className="flex items-start space-x-1.5">
+                        <span className="text-[#183D32] font-bold">•</span>
+                        <span>{obs}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="p-3 bg-[#F6F3EB] rounded-sm border border-[#D8DCD1] space-y-2">
+                  <span className="text-[10px] font-mono-num uppercase tracking-wider text-[#183D32] font-bold block">
+                    Actionable Discretionary Trims
+                  </span>
+                  <ul className="space-y-1.5 text-xs text-[#202822]/80">
+                    {spendingInsights.actionable_trims.map((trim, idx) => (
+                      <li key={idx} className="flex items-start space-x-1.5">
+                        <TrendingDown className="w-3.5 h-3.5 text-[#C66D51] shrink-0 mt-0.5" />
+                        <span>{trim}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Top Ledger Summaries */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -203,7 +299,7 @@ export const ExpensePage: React.FC<ExpensePageProps> = ({ currency = '₹', onDa
             {breakdown.length > 0 ? breakdown[0].category : 'None'}
           </div>
           <span className="text-xs text-[#202822]/60 mt-1 block font-mono-num">
-            {breakdown.length > 0 ? `${currency}${breakdown[0].total.toLocaleString('en-IN')} (${Math.round((breakdown[0].total / (totalSpent || 1)) * 100)}% of total)` : 'No data'}
+            {breakdown.length > 0 ? `${currency}{breakdown[0].total.toLocaleString('en-IN')} (${Math.round((breakdown[0].total / (totalSpent || 1)) * 100)}% of total)` : 'No data'}
           </span>
         </div>
 

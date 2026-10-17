@@ -18,6 +18,7 @@ interface SidebarProps {
   unreadCount: number;
   onOpenNotifications: () => void;
   onQuickResetDemo: () => void;
+  onOpenAskVerdant: () => void;
   userName: string;
 }
 
@@ -27,6 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   unreadCount,
   onOpenNotifications,
   onQuickResetDemo,
+  onOpenAskVerdant,
   userName
 }) => {
   const navItems = [
@@ -102,6 +104,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
             );
           })}
         </nav>
+
+        {/* Ask VERDANT Quick Launcher */}
+        <div className="p-3 pt-2">
+          <button
+            onClick={onOpenAskVerdant}
+            className="w-full flex items-center justify-between px-3.5 py-2.5 text-xs rounded-sm font-semibold border border-[#183D32] bg-[#FBF9F4] text-[#183D32] hover:bg-[#D5EE75]/20 transition-all shadow-xs"
+          >
+            <div className="flex items-center space-x-2">
+              <Sparkles className="w-3.5 h-3.5 text-[#183D32]" />
+              <span>Ask VERDANT</span>
+            </div>
+            <span className="text-[9px] px-1.5 py-0.2 bg-[#183D32] text-[#D5EE75] rounded font-mono-num font-bold">
+              AI CHAT
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* User Status and Academic Demo Reset Footer */}
