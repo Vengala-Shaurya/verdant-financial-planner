@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --paper: #F6F3EB;
+    --forest: #183D32;
+    --ink: #202822;
+    --sage: #A8B9A0;
+    --chartreuse: #D5EE75;
+    --border: #D8DCD1;
+    --panel: #FFFEFA;
+    --terracotta: #C66D51;
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    letter-spacing: -0.01em;
+  }
+
+  h1, h2, .font-editorial {
+    font-family: 'Instrument Serif', Georgia, serif;
+  }
+
+  .font-mono-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-feature-settings: "tnum" 1, "zero" 1;
+  }
+}
+
+/* Custom living ledger styles */
+.ledger-border {
+  border-color: #D8DCD1;
+}
+
+.subtle-paper-shadow {
+  box-shadow: 0 1px 3px rgba(32, 40, 34, 0.04), 0 4px 12px rgba(32, 40, 34, 0.02);
+}
+
+.rule-line {
+  height: 1px;
+  background-color: #D8DCD1;
+}
+
+/* Scrollbar polish */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F6F3EB;
+}
+::-webkit-scrollbar-thumb {
+  background: #D8DCD1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A8B9A0;
+}
