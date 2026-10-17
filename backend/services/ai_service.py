@@ -1,30 +1,61 @@
 import os
 import json
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from services.analysis_engine import calculate_financial_health, calculate_goal_allocations
 
 logger = logging.getLogger("verdant.ai")
 
-# Check for OpenAI SDK
+# Google GenAI SDK Import
 try:
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
+    from google import genai
+    from google.genai import types
+    GEMINI_SDK_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
+    GEMINI_SDK_AVAILABLE = False
+    logger.warning("google-genai SDK not installed or unavailable.")
 
-def get_openai_client() -> Optional[Any]:
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key or not OPENAI_AVAILABLE:
+def is_gemini_enabled() -> bool:
+    """Checks if GEMINI_ENABLED is true (default is true if key is present)."""
+    val = os.environ.get("GEMINI_ENABLED", "true").strip().lower()
+    return val in ("true", "1", "yes")
+
+def get_gemini_model_name() -> str:
+    """
+    Returns the configured Gemini model identifier.
+    Default: 'gemini-2.5-flash' (Google's latest official high-speed, cost-effective multimodal model with generous free-tier limits).
+    Fallback options: 'gemini-1.5-flash', 'gemini-1.5-pro'.
+    """
+    return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+
+def get_gemini_client() -> Optional[Any]:
+    """
+    Instantiates and returns the official Google GenAI client if GEMINI_API_KEY is configured.
+    Never logs or exposes the key.
+    """
+    if not GEMINI_SDK_AVAILABLE or not is_gemini_enabled():
         return None
+
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None
+
     try:
-        return OpenAI(api_key=api_key, timeout=12.0)
+        # Initializing client using official google.genai Client
+        client = genai.Client(api_key=api_key)
+        return client
     except Exception as e:
-        logger.warning(f"Failed to initialize OpenAI client: {e}")
+        logger.warning(f"Failed to initialize Google GenAI client: {e}")
         return None
 
-def get_model_name() -> str:
-    return os.environ.get("OPENAI_MODEL", "gpt-4o-mini").strip()
+def clean_json_text(text: str) -> str:
+    """Strips markdown code fences like ```json ... ``` from model responses."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return text.strip()
 
 # Backward compatibility alias
 def get_ai_explanation(plan_summary: Dict[str, Any], user_name: str = "User") -> Dict[str, Any]:
@@ -36,8 +67,8 @@ def get_ai_explanation(plan_summary: Dict[str, Any], user_name: str = "User") ->
 
 def generate_plan_ai_insights(plan_summary: Dict[str, Any], user_name: str = "User") -> Dict[str, Any]:
     """
-    Feature A: Generates structured, validated narrative explanation for the verified savings plan.
-    Strictly grounded in deterministic figures; LLM cannot alter numerical allocations.
+    Feature A: Generates structured narrative explanations for the verified savings plan.
+    Strictly grounded in deterministic figures; Gemini explains but cannot alter numerical allocations.
     """
     fin = plan_summary.get('financial_health', {})
     income = fin.get('income', 0)
@@ -49,21 +80,23 @@ def generate_plan_ai_insights(plan_summary: Dict[str, Any], user_name: str = "Us
     warnings = plan_summary.get('warnings', [])
     actions = plan_summary.get('actions_next_30_days', [])
 
-    client = get_openai_client()
+    client = get_gemini_client()
     if client:
         try:
-            system_prompt = (
+            model_name = get_gemini_model_name()
+            system_instruction = (
                 "You are an elite, mathematically rigorous wealth architect for VERDANT, an editorial financial planning system. "
-                "You provide intellectual, clear, and actionable commentary grounded STRICTLY in the provided calculations. "
-                "Never contradict the verified surplus or allocation numbers. Return a valid JSON object matching the requested schema."
+                "You provide clear, encouraging, and actionable commentary grounded STRICTLY in the provided calculations. "
+                "Never contradict the verified surplus, expenses, or allocation numbers. "
+                "Never invent financial figures. Return valid JSON matching the requested schema."
             )
 
             goals_summary_txt = [
-                f"{g['name']}: Gap ₹{g['remaining_gap']:,.0f}, Allocated ₹{g['allocated_monthly']:,.0f}/mo, Feasibility: {g['feasibility']}"
+                f"{g['name']}: Gap ₹{g.get('remaining_gap', 0):,.0f}, Allocated ₹{g.get('allocated_monthly', 0):,.0f}/mo, Feasibility: {g.get('feasibility', 'Evaluated')}"
                 for g in goals
             ]
 
-            user_prompt = f"""
+            prompt = f"""
 Analyze this verified financial plan for {user_name}:
 - Take-Home Monthly Income: ₹{income:,.0f}
 - Fixed Essential Living Expenses: ₹{fin.get('fixed_expenses', 0):,.0f}
@@ -85,33 +118,32 @@ Produce a JSON response with exactly these keys:
   "action_plan_30_days": ["Concrete action 1", "Concrete action 2", "Concrete action 3"]
 }}
 """
-            response = client.chat.completions.create(
-                model=get_model_name(),
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"},
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
                 temperature=0.3
             )
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=config
+            )
 
-            raw_content = response.choices[0].message.content
-            parsed = json.loads(raw_content)
-
-            # Validate schema
-            if "personalized_summary" in parsed and "allocation_rationales" in parsed:
-                return {
-                    'mode': 'llm_active',
-                    'provider': f"OpenAI ({get_model_name()})",
-                    'narrative': parsed.get('personalized_summary', ''),
-                    'allocation_rationales': parsed.get('allocation_rationales', []),
-                    'spending_observations': parsed.get('spending_observations', []),
-                    'discretionary_reductions': parsed.get('discretionary_reductions', []),
-                    'risks_and_tradeoffs': parsed.get('risks_and_tradeoffs', []),
-                    'action_plan_30_days': parsed.get('action_plan_30_days', actions)
-                }
+            if response and response.text:
+                parsed = json.loads(clean_json_text(response.text))
+                if "personalized_summary" in parsed and "allocation_rationales" in parsed:
+                    return {
+                        'mode': 'llm_active',
+                        'provider': f"Google Gemini ({model_name})",
+                        'narrative': parsed.get('personalized_summary', ''),
+                        'allocation_rationales': parsed.get('allocation_rationales', []),
+                        'spending_observations': parsed.get('spending_observations', []),
+                        'discretionary_reductions': parsed.get('discretionary_reductions', []),
+                        'risks_and_tradeoffs': parsed.get('risks_and_tradeoffs', []),
+                        'action_plan_30_days': parsed.get('action_plan_30_days', actions)
+                    }
         except Exception as e:
-            logger.warning(f"OpenAI Feature A call failed or malformed: {e}. Falling back to deterministic engine.")
+            logger.warning(f"Gemini Feature A call failed: {e}. Falling back to deterministic engine.")
 
     # High-fidelity deterministic fallback
     return get_deterministic_plan_insights(plan_summary, user_name)
@@ -165,7 +197,7 @@ def get_deterministic_plan_insights(plan_summary: Dict[str, Any], user_name: str
 
     return {
         'mode': 'deterministic_editorial',
-        'provider': 'VERDANT Rule-Based Financial Synthesis Engine',
+        'provider': 'VERDANT Rule-Based Financial Synthesis Engine (AI Offline)',
         'narrative': summary,
         'allocation_rationales': rationales,
         'spending_observations': spending_obs,
@@ -204,15 +236,16 @@ def generate_spending_insights(expenses: List[Dict[str, Any]], income: float, fi
 
     has_sufficient_history = len(expenses) >= 5
 
-    client = get_openai_client()
+    client = get_gemini_client()
     if client and has_sufficient_history:
         try:
-            system_prompt = (
+            model_name = get_gemini_model_name()
+            system_instruction = (
                 "You are an expert personal financial auditor for VERDANT. "
                 "Analyze the provided actual expense records. Do NOT invent transactions or trends. "
                 "Return a JSON object with structured spending insights."
             )
-            user_prompt = f"""
+            prompt = f"""
 Take-Home Income: ₹{income:,.0f}
 Total Logged Spend: ₹{total_spent:,.0f}
 Top Categories: {top_categories[:4]}
@@ -226,30 +259,32 @@ Return JSON:
   "actionable_trims": ["Actionable recommendation 1", "Actionable recommendation 2"]
 }}
 """
-            response = client.chat.completions.create(
-                model=get_model_name(),
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"},
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
                 temperature=0.3
             )
-            parsed = json.loads(response.choices[0].message.content)
-            return {
-                'mode': 'llm_active',
-                'provider': f"OpenAI ({get_model_name()})",
-                'has_sufficient_history': True,
-                'total_spent': round(total_spent, 2),
-                'top_categories': top_categories[:5],
-                'large_expenses': large_expenses,
-                'large_expense_threshold': large_expense_threshold,
-                'spending_assessment': parsed.get('spending_assessment', ''),
-                'key_observations': parsed.get('key_observations', []),
-                'actionable_trims': parsed.get('actionable_trims', [])
-            }
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=config
+            )
+            if response and response.text:
+                parsed = json.loads(clean_json_text(response.text))
+                return {
+                    'mode': 'llm_active',
+                    'provider': f"Google Gemini ({model_name})",
+                    'has_sufficient_history': True,
+                    'total_spent': round(total_spent, 2),
+                    'top_categories': top_categories[:5],
+                    'large_expenses': large_expenses,
+                    'large_expense_threshold': large_expense_threshold,
+                    'spending_assessment': parsed.get('spending_assessment', ''),
+                    'key_observations': parsed.get('key_observations', []),
+                    'actionable_trims': parsed.get('actionable_trims', [])
+                }
         except Exception as e:
-            logger.warning(f"OpenAI Feature B call failed: {e}. Falling back to deterministic insights.")
+            logger.warning(f"Gemini Feature B call failed: {e}. Falling back to deterministic insights.")
 
     # Deterministic spending insights
     obs = []
@@ -263,16 +298,16 @@ Return JSON:
         trims.append(f"Review large single outflows such as '{large_expenses[0]['description']}' (₹{large_expenses[0]['amount']:,.0f}) to ensure they are planned.")
 
     if not has_sufficient_history:
-        obs.append("Ledger has limited transaction history. Log 5 or more transactions across diverse dates to enable deep trend analysis.")
+        obs.append(f"Ledger currently has {len(expenses)} transaction(s). Log 5 or more transactions across diverse dates to enable automated trend analysis.")
 
     assessment = (
-        f"Total verified ledger outflows stand at ₹{total_spent:,.0f} across {len(expenses)} transactions. "
+        f"Total verified ledger outflows stand at ₹{total_spent:,.0f} across {len(expenses)} transaction(s). "
         f"{'Spending is concentrated in essential living costs.' if top_categories and top_categories[0]['category'] in ['Housing', 'Food', 'Utilities'] else 'Discretionary outflows represent a significant portion of current velocity.'}"
     )
 
     return {
         'mode': 'deterministic_editorial',
-        'provider': 'VERDANT Rule-Based Spending Auditor',
+        'provider': 'VERDANT Rule-Based Spending Auditor (AI Offline)',
         'has_sufficient_history': has_sufficient_history,
         'total_spent': round(total_spent, 2),
         'top_categories': top_categories[:5],
@@ -287,129 +322,184 @@ Return JSON:
 # AI FEATURE C: Contextual "Ask VERDANT" Assistant & Hypothetical Simulation
 # ==============================================================================
 
+def classify_query_intent(query_text: str) -> str:
+    """Classifies user queries into: greeting, casual_short, hypothetical, financial, general."""
+    q = (query_text or '').strip().lower()
+    
+    # Common greetings and small talk
+    greetings = {"hi", "hello", "hey", "hola", "greetings", "good morning", "good evening", "good afternoon", "namaste"}
+    if q in greetings or re.match(r"^(?:hi|hello|hey|greetings|namaste)\b", q):
+        return "greeting"
+
+    # Casual slang / single-word queries
+    casual_words = {"bruh", "bro", "sup", "yo", "cool", "ok", "okay", "thanks", "thank you", "nice", "bye"}
+    if q in casual_words or re.match(r"^(?:bruh|bro|yo|sup)\b[!., ]*", q):
+        return "casual"
+
+    # Hypothetical what-if queries
+    if any(k in q for k in ["what if", "suppose", "if my income", "if income", "if rent", "if expenses", "decreases by", "increases by", "falls by", "rises by"]):
+        return "hypothetical"
+
+    # Financial domain queries
+    fin_keywords = ["surplus", "savings", "save", "plan", "goal", "budget", "emergency", "fund", "debt", "emi", "expense", "spend", "income", "money", "invest", "runway", "cash flow", "waterfall", "priority", "allocate"]
+    if any(k in q for k in fin_keywords):
+        return "financial"
+
+    return "general"
+
 def answer_financial_query(user_profile: Dict[str, Any], goals: List[Dict[str, Any]], active_plan: Optional[Dict[str, Any]], query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
-    Feature C: Contextual conversational assistant capable of answering questions
-    and parsing & computing hypothetical 'what-if' scenarios through Python calculation.
+    Feature C: Contextual conversational assistant capable of handling greetings,
+    answering user-specific financial questions, simulating hypothetical 'what-if' scenarios,
+    and handling non-financial questions appropriately.
     """
-    query_lower = query.lower()
+    query_trimmed = query.strip()
+    query_lower = query_trimmed.lower()
+    intent = classify_query_intent(query_lower)
+
+    user_name = user_profile.get('name', 'there')
     income = float(user_profile.get('monthly_income', 0) or 0)
     fixed_exp = float(user_profile.get('fixed_expenses', 0) or 0)
     var_exp = float(user_profile.get('variable_expenses', 0) or 0)
     debt = float(user_profile.get('debt_obligations', 0) or 0)
     savings = float(user_profile.get('existing_savings', 0) or 0)
+    current_surplus = income - fixed_exp - var_exp - debt
 
-    # 1. Detect if this is a hypothetical 'what-if' question
+    # 1. Parse and simulate hypothetical 'what-if' scenarios deterministically in Python
     scenario_result = None
-    is_hypothetical = False
-    delta_income = 0.0
-    delta_expenses = 0.0
+    if intent == "hypothetical":
+        delta_income = 0.0
+        delta_expenses = 0.0
 
-    # Pattern check: income change
-    import re
-    inc_decrease_match = re.search(r'income (?:falls|drops|decreases|reduced) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
-    inc_increase_match = re.search(r'income (?:rises|increases|grows) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
-    rent_increase_match = re.search(r'(?:rent|expenses?) (?:increases?|rises?|goes up) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
+        inc_decrease_match = re.search(r'income (?:falls|drops|decreases|reduced|down) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
+        inc_increase_match = re.search(r'income (?:rises|increases|grows|up) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
+        rent_increase_match = re.search(r'(?:rent|expenses?|outflows?) (?:increases?|rises?|goes up) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
+        rent_decrease_match = re.search(r'(?:rent|expenses?|outflows?) (?:decreases?|falls?|goes down) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
 
-    if inc_decrease_match:
-        val = float(inc_decrease_match.group(1).replace(',', ''))
-        delta_income = -val
-        is_hypothetical = True
-    elif inc_increase_match:
-        val = float(inc_increase_match.group(1).replace(',', ''))
-        delta_income = val
-        is_hypothetical = True
+        if inc_decrease_match:
+            delta_income = -float(inc_decrease_match.group(1).replace(',', ''))
+        elif inc_increase_match:
+            delta_income = float(inc_increase_match.group(1).replace(',', ''))
 
-    if rent_increase_match:
-        val = float(rent_increase_match.group(1).replace(',', ''))
-        delta_expenses = val
-        is_hypothetical = True
+        if rent_increase_match:
+            delta_expenses = float(rent_increase_match.group(1).replace(',', ''))
+        elif rent_decrease_match:
+            delta_expenses = -float(rent_decrease_match.group(1).replace(',', ''))
 
-    if is_hypothetical:
-        hypo_income = max(0.0, income + delta_income)
-        hypo_fixed = max(0.0, fixed_exp + delta_expenses)
-        hypo_health = calculate_financial_health(hypo_income, hypo_fixed, var_exp, debt, savings)
-        hypo_goals, hypo_allocated, hypo_warnings = calculate_goal_allocations(hypo_health['monthly_surplus'], goals)
+        if delta_income != 0.0 or delta_expenses != 0.0:
+            hypo_income = max(0.0, income + delta_income)
+            hypo_fixed = max(0.0, fixed_exp + delta_expenses)
+            hypo_health = calculate_financial_health(hypo_income, hypo_fixed, var_exp, debt, savings)
+            hypo_goals, hypo_allocated, hypo_warnings = calculate_goal_allocations(hypo_health['monthly_surplus'], goals)
+            surplus_shift = hypo_health['monthly_surplus'] - current_surplus
 
-        current_surplus = income - fixed_exp - var_exp - debt
-        surplus_shift = hypo_health['monthly_surplus'] - current_surplus
+            scenario_result = {
+                'is_hypothetical': True,
+                'hypothetical_income': hypo_income,
+                'hypothetical_fixed_expenses': hypo_fixed,
+                'hypothetical_surplus': hypo_health['monthly_surplus'],
+                'surplus_shift': surplus_shift,
+                'hypothetical_allocated_savings': hypo_allocated,
+                'hypothetical_savings_rate': hypo_health['potential_surplus_rate'],
+                'affected_goals': [
+                    {'name': g['name'], 'allocated': g['allocated_monthly'], 'feasibility': g['feasibility']}
+                    for g in hypo_goals
+                ]
+            }
 
-        scenario_result = {
-            'is_hypothetical': True,
-            'hypothetical_income': hypo_income,
-            'hypothetical_fixed_expenses': hypo_fixed,
-            'hypothetical_surplus': hypo_health['monthly_surplus'],
-            'surplus_shift': surplus_shift,
-            'hypothetical_allocated_savings': hypo_allocated,
-            'hypothetical_savings_rate': hypo_health['potential_surplus_rate'],
-            'affected_goals': [
-                {'name': g['name'], 'allocated': g['allocated_monthly'], 'feasibility': g['feasibility']}
-                for g in hypo_goals
-            ]
-        }
-
-    client = get_openai_client()
+    # 2. Try Gemini LLM Generation
+    client = get_gemini_client()
     if client:
         try:
-            system_prompt = (
-                "You are VERDANT's AI Financial Architect. Answer the user's inquiry based exclusively on their verified records. "
-                "If a hypothetical scenario is analyzed, explain the mathematically calculated consequences clearly. "
-                "Always remind the user that hypothetical scenarios are simulations and do NOT alter their real financial baseline."
+            model_name = get_gemini_model_name()
+            system_instruction = (
+                f"You are Ask VERDANT, an intelligent conversational financial planning assistant for {user_name}. "
+                "Tone: Editorial, intellectual, warm, concise, and mathematically rigorous. "
+                "\nCRITICAL DIRECTIVES:\n"
+                "1. If the user sends a greeting (e.g. 'hi', 'hello', 'hey'), respond with a natural, friendly greeting and briefly invite them to explore their ledger or test a financial scenario. Do NOT dump long financial statistics in response to simple greetings.\n"
+                "2. If the user asks a casual query (e.g. 'bruh', 'sup', 'ok'), give a witty, natural, context-aware reply acknowledging them while gently reminding them of what you can assist with.\n"
+                "3. If the user asks about their finances, use ONLY their verified ledger data provided in the context. Never invent income or expenses.\n"
+                "4. If answering a hypothetical scenario, explain the calculated simulation clearly and remind the user that it does not alter their real saved ledger.\n"
+                "5. If financial information is incomplete (e.g. income is 0 or unrecorded), state what is missing instead of guessing.\n"
+                "6. Format currency consistently as ₹ with commas (e.g. ₹22,000). Use Markdown formatting cleanly."
             )
 
-            context_msg = f"""
-USER CONTEXT:
-- Real Take-Home Income: ₹{income:,.0f}
-- Real Fixed Expenses: ₹{fixed_exp:,.0f}
-- Real Variable Expenses: ₹{var_exp:,.0f}
-- Real Debt Obligations: ₹{debt:,.0f}
-- Real Net Surplus: ₹{(income - fixed_exp - var_exp - debt):,.0f}
-- Existing Liquid Savings: ₹{savings:,.0f}
-- Current Goals: {[{'name': g.get('name'), 'target': g.get('target_amount'), 'gap': float(g.get('target_amount',0)) - float(g.get('current_amount',0))} for g in goals]}
+            user_context_block = f"""
+AUTHENTICATED USER CONTEXT ({user_name}):
+- Verified Take-Home Income: ₹{income:,.0f}
+- Verified Fixed Living Expenses: ₹{fixed_exp:,.0f}
+- Verified Variable Expenses: ₹{var_exp:,.0f}
+- Verified Debt Obligations: ₹{debt:,.0f}
+- Verified Monthly Net Surplus: ₹{current_surplus:,.0f}
+- Liquid Emergency Savings: ₹{savings:,.0f}
+- Active Goals: {[{'name': g.get('name'), 'target': f"₹{float(g.get('target_amount',0)):,.0f}", 'saved': f"₹{float(g.get('current_amount',0)):,.0f}", 'priority': g.get('priority')} for g in goals]}
 """
             if scenario_result:
-                context_msg += f"\nHYPOTHETICAL SIMULATION RESULT (Calculated by Python Engine):\n{json.dumps(scenario_result)}"
+                user_context_block += f"\nHYPOTHETICAL SIMULATION RESULT (Calculated by Python Engine):\n{json.dumps(scenario_result)}"
 
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "system", "content": context_msg}
-            ]
-
+            # Prepare prompt contents with recent history
+            contents = []
+            contents.append(user_context_block)
             if conversation_history:
                 for h in conversation_history[-4:]:
-                    messages.append({"role": h.get('role', 'user'), "content": h.get('content', '')})
+                    role_label = "User" if h.get('role') == 'user' else "Assistant"
+                    contents.append(f"{role_label}: {h.get('content', '')}")
+            contents.append(f"User Question: {query_trimmed}")
 
-            messages.append({"role": "user", "content": query})
-
-            response = client.chat.completions.create(
-                model=get_model_name(),
-                messages=messages,
+            full_prompt = "\n\n".join(contents)
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction,
                 temperature=0.3
             )
-            answer_text = response.choices[0].message.content.strip()
+            response = client.models.generate_content(
+                model=model_name,
+                contents=full_prompt,
+                config=config
+            )
 
-            return {
-                'mode': 'llm_active',
-                'provider': f"OpenAI ({get_model_name()})",
-                'answer': answer_text,
-                'scenario_simulation': scenario_result
-            }
+            if response and response.text:
+                return {
+                    'mode': 'llm_active',
+                    'provider': f"Google Gemini ({model_name})",
+                    'answer': response.text.strip(),
+                    'scenario_simulation': scenario_result
+                }
         except Exception as e:
-            logger.warning(f"OpenAI Feature C call failed: {e}. Falling back to deterministic response.")
+            logger.warning(f"Gemini Feature C call failed: {e}. Falling back to contextual fallback.")
 
-    # High-quality deterministic response generator
-    answer_text = generate_deterministic_query_answer(query_lower, income, fixed_exp, var_exp, debt, savings, goals, active_plan, scenario_result)
+    # 3. Contextual Fallback Generator (Handles Greetings, Slang, What-Ifs, and Financial queries naturally)
+    answer_text = generate_contextual_query_answer(
+        intent, query_lower, user_name, income, fixed_exp, var_exp, debt, savings, current_surplus, goals, active_plan, scenario_result
+    )
 
     return {
         'mode': 'deterministic_editorial',
-        'provider': 'VERDANT Rule-Based Financial Assistant',
+        'provider': 'VERDANT Rule-Based Financial Assistant (AI Offline)',
         'answer': answer_text,
         'scenario_simulation': scenario_result
     }
 
-def generate_deterministic_query_answer(query: str, income: float, fixed: float, var: float, debt: float, savings: float, goals: List[Dict[str, Any]], active_plan: Optional[Dict[str, Any]], scenario_result: Optional[Dict[str, Any]]) -> str:
-    current_surplus = income - fixed - var - debt
+def generate_contextual_query_answer(
+    intent: str, query: str, user_name: str, income: float, fixed: float, var: float, debt: float, savings: float, current_surplus: float, goals: List[Dict[str, Any]], active_plan: Optional[Dict[str, Any]], scenario_result: Optional[Dict[str, Any]]
+) -> str:
+    """Generates context-aware responses when the live LLM is offline or unconfigured."""
 
+    # 1. Greetings
+    if intent == "greeting":
+        return (
+            f"Hello {user_name}! I am **Ask VERDANT**, your private financial planning assistant.\n\n"
+            f"Your ledger is currently showing a verified monthly surplus of **₹{current_surplus:,.0f}**. "
+            f"You can ask me questions about your savings plan, explore your goal priorities, or test what-if scenarios (e.g., *'What happens if my income falls by ₹5,000?'*)."
+        )
+
+    # 2. Casual / Slang
+    if intent == "casual":
+        return (
+            f"I hear you! I'm here and ready to help you optimize your personal wealth architecture. "
+            f"Feel free to ask a question about your ₹{current_surplus:,.0f} surplus, your goals, or test any financial change."
+        )
+
+    # 3. Hypothetical simulation
     if scenario_result:
         shift_str = f"+₹{scenario_result['surplus_shift']:,.0f}" if scenario_result['surplus_shift'] >= 0 else f"-₹{abs(scenario_result['surplus_shift']):,.0f}"
         return (
@@ -419,16 +509,25 @@ def generate_deterministic_query_answer(query: str, income: float, fixed: float,
             f"*Note: This is an exploratory simulation for strategic planning only. Your persistent profile values remain unchanged.*"
         )
 
+    # 4. Incomplete financial data
+    if income <= 0:
+        return (
+            f"Your financial baseline currently has no recorded take-home income. "
+            f"To provide accurate financial projections, please update your profile with your monthly income and fixed commitments in the Financial Profile tab."
+        )
+
+    # 5. Targeted financial inquiries
     if 'why' in query and 'plan' in query:
         return (
             f"Your current plan was generated using VERDANT's priority-weighted waterfall algorithm. "
-            f"With verified income of ₹{income:,.0f} and total commitments of ₹{(fixed + var + debt):,.0f}, your net monthly surplus is ₹{current_surplus:,.0f}. "
+            f"With verified income of ₹{income:,.0f} and total commitments of ₹{(fixed + var + debt):,.0f}, your net monthly surplus is **₹{current_surplus:,.0f}**. "
             f"The engine prioritized goals with near deadlines and high necessity (such as Emergency Cushion) to ensure core liquidity before funding secondary milestones."
         )
     elif 'emergency' in query:
+        runway = round(savings / ((fixed + var) or 1), 1)
         return (
-            f"Your liquid savings stand at ₹{savings:,.0f}, providing approximately {round(savings / (fixed + var or 1), 1)} months of essential living runway (₹{(fixed + var):,.0f}/mo). "
-            f"To accelerate completion, trimming 10% of variable spending unlocks additional capital for immediate allocation."
+            f"Your liquid savings stand at **₹{savings:,.0f}**, providing approximately **{runway} months** of essential living runway (based on ₹{(fixed + var):,.0f}/mo living costs). "
+            f"To accelerate emergency funding, allocating discretionary trims from variable spending directly builds this safety barrier."
         )
     elif 'priorit' in query:
         return (
@@ -439,5 +538,6 @@ def generate_deterministic_query_answer(query: str, income: float, fixed: float,
         return (
             f"Based on your verified financial profile, your available monthly surplus is **₹{current_surplus:,.0f}** "
             f"({round(current_surplus / (income or 1) * 100, 1)}% of ₹{income:,.0f} income). "
-            f"You have {len(goals)} active goals with total funding demand. You can explore 'what-if' questions (e.g. 'What happens if income falls by ₹5,000?') to simulate timeline impacts."
+            f"You have {len(goals)} active goal(s) registered. "
+            f"Feel free to ask specific questions about your goals or test hypothetical scenarios like *'What if my rent increases by ₹2,000?'*."
         )

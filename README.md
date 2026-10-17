@@ -77,24 +77,28 @@ Cross-user access attempts result in `404 Not Found / Access Denied`.
 
 ---
 
-## 4. The Three AI Features (Authenticated & Scoped)
+## 4. The Three AI Features (Powered by Google Gemini API)
 
 1. **AI Feature A: Personalised Savings-Plan Explanations (`/api/ai/plan-insights`)**
-   - Synthesizes qualitative insights, allocation rationales, and 30-day action items based on the user's verified surplus and deterministic plan.
+   - Synthesizes qualitative insights, allocation rationales, and 30-day action items based on the user's verified surplus and deterministic plan using Google Gemini (`gemini-2.5-flash`).
 2. **AI Feature B: Personalised Spending Insights (`/api/ai/spending-insights`)**
    - Audits the user's ledger transactions to surface category velocity, large outflows (≥ ₹5,000), and discretionary trim opportunities.
 3. **AI Feature C: Ask VERDANT Conversational What-If Simulation (`/api/ai/ask`, `/api/ai/history`)**
-   - Chat assistant capable of parsing natural language hypothetical scenarios (e.g., *"What if my income increases by 10,000?"*), simulating the recalculation in Python without altering persistent database records.
-   - Includes automatic deterministic fallback when OpenAI API keys are not configured.
+   - Conversational assistant with intelligent query intent classification:
+     - Greetings (`hi`, `hello`) receive natural welcomes without dumping unnecessary financial statistics.
+     - Casual conversation (`bruh`, `yo`) receives natural responses.
+     - Financial inquiries use the authenticated user's actual database context.
+     - Hypothetical scenarios (e.g., *"What if income falls by ₹5,000?"*) are simulated deterministically in Python without altering persistent database records.
+   - Includes automatic, honest deterministic fallback when Gemini API keys are omitted or quota is exceeded.
 
 ---
 
 ## 5. Automated Test Suite
 
-Run the full automated test suite covering financial calculations, AI fallbacks, authentication, duplicate rejection, and cross-user data isolation:
+Run the full automated test suite covering financial calculations, Gemini AI integration, intent classification, authentication, duplicate rejection, and cross-user data isolation:
 
 ```bash
 PYTHONPATH=.:backend ./venv/bin/python -m unittest discover -s backend/tests
 ```
 
-Results: **13 tests pass (100% success rate)**.
+Results: **21 tests pass (100% success rate)**.

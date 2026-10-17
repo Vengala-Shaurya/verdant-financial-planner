@@ -13,7 +13,7 @@ VERDANT is a functional, presentation-ready full-stack web application developed
 ### Core Architectural Philosophy: "Zero Financial Hallucination"
 A key challenge with AI in financial planning is hallucinations (e.g., allocating more money than available surplus, or double-counting debt obligations). VERDANT resolves this by maintaining a strict **separation of concerns**:
 - **Deterministic Calculation Engine (Python):** Governs all mathematical budgets, surplus constraints, priority weights, and month-by-month compounding simulations.
-- **Contextual LLM Synthesis (OpenAI GPT-4o-mini / Fallback):** Synthesizes qualitative insights, contextual behavioral rationales, and risk mitigation strategies without altering verified numerical allocations.
+- **Contextual LLM Synthesis (Google Gemini API / Fallback):** Synthesizes qualitative insights, contextual behavioral rationales, and risk mitigation strategies using Google's official `google-genai` SDK without altering verified numerical allocations.
 - **Strict Data Isolation & Authentication:** Every personal account has its own isolated records in SQLite. Fictional demo records for Arjun Verma remain completely separate and are never seeded or leaked into newly registered accounts.
 
 ---
@@ -70,45 +70,49 @@ Cross-account tampering attempts return `404 Not Found / Access Denied`.
 | **Data Visualisation** | Recharts (ResponsiveContainer, BarChart, AreaChart, Pie) | SVG charts for cash-flow waterfalls, category spend distributions, and 12-month wealth simulation curves. |
 | **Backend Server** | Python 3.12, Flask, Flask-CORS | Modular REST API service handling calculation services, validation, and data serialization. |
 | **Database & Persistence**| SQLite (`verdant.db`) | Embedded relational database with foreign-key indexes on `user_id`. |
-| **AI Integration** | Hybrid OpenAI API + Deterministic Fallback | LLM API with an automatic, calibrated deterministic editorial wealth engine when no API key is present. |
-| **Testing** | Python `unittest` (13 automated tests) | Covers authentication, duplicate rejection, data isolation, onboarding, financial math, and AI fallbacks. |
+| **AI Integration** | Official Google GenAI SDK (`google-genai`) + Free-Tier Gemini 2.5 Flash | Free-tier conversational and analytical intelligence with intelligent intent-driven offline fallbacks. No OpenAI dependencies. |
+| **Testing** | Python `unittest` (21 automated tests) | Covers authentication, duplicate rejection, data isolation, onboarding, financial math, query intents, and Gemini mocking. |
 
 ---
 
-## 4. The Three AI Features (Authenticated & Scoped)
+## 4. The Three AI Features (Powered by Google Gemini with Contextual Fallbacks)
 
 1. **AI Feature A: Personalised Savings-Plan Explanations (`/api/ai/plan-insights`)**
    - Retrieves the user's active deterministic plan and provides qualitative breakdowns of goal feasibility, 30-day behavioral steps, and discretionary reductions.
 2. **AI Feature B: Personalised Spending Insights (`/api/ai/spending-insights`)**
-   - Audits the user's actual ledger transactions to detect velocity trends, category concentration, and large outflows (threshold ≥ ₹5,000).
+   - Audits the user's actual ledger transactions to detect velocity trends, category concentration, and large outflows (threshold ≥ ₹5,000 or 10% income).
 3. **AI Feature C: Ask VERDANT Conversational What-If Simulation (`/api/ai/ask`, `/api/ai/history`)**
-   - Chat assistant capable of parsing natural language hypothetical scenarios (e.g., *"What if my income increases by 10,000?"*), simulating the recalculation in Python without altering persistent database records.
+   - Conversational assistant with query classification:
+     - **Greetings (`hi`, `hello`):** Returns natural, friendly welcomes without dumping lengthy financial tables.
+     - **Casual (`bruh`, `yo`):** Acknowledges naturally without repeating generic text.
+     - **Financial:** Uses strictly authenticated user context.
+     - **Hypothetical What-Ifs:** Parses natural language scenarios (e.g., *"What if income falls by 5,000?"*), recalculating the impact in Python without modifying the database.
 
 ---
 
 ## 5. Verification & Test Execution Results
 
-All 13 automated backend tests and the TypeScript production build pass:
+All 21 automated backend tests and the TypeScript production build pass:
 
 ```bash
-# 1. Automated Test Suite (13 tests)
+# 1. Automated Test Suite (21 tests)
 PYTHONPATH=.:backend ./venv/bin/python -m unittest discover -s backend/tests
 ----------------------------------------------------------------------
-Ran 13 tests in 0.546s
+Ran 21 tests in 0.572s
 OK
 
 # 2. Frontend Production Bundle
 npm run build
 ✓ 2506 modules transformed.
 dist/index.html                   1.13 kB
-dist/assets/index-Cx24ZEpH.css   33.02 kB
-dist/assets/index-BzQnFmOh.js   750.67 kB
-✓ built in 432ms
+dist/assets/index-BWhwPTf9.css   33.10 kB
+dist/assets/index-D_eZ7wAm.js   752.30 kB
+✓ built in 433ms
 ```
 
 ### Verified Scenarios:
-1. **Demo Login:** Arjun Verma persona loads instantly with ₹22k surplus, 44% savings rate, and sample records.
-2. **Sign Out:** Application clears session and returns cleanly to Auth Page.
-3. **Registration & Duplicate Rejection:** Case-insensitive duplicate email detection correctly blocks collision.
-4. **Onboarding Wizard:** First-time personal users complete the 4-step wizard; data is persisted and an initial plan is synthesized.
-5. **Data Isolation:** User B cannot read, update, or contribute to User A's expenses or goals (returns 404). Personal users never see demo records.
+1. **Gemini SDK Integration:** Official `google-genai` integration with `gemini-2.5-flash` model.
+2. **Graceful Fallback:** Missing or invalid keys trigger honest, context-aware offline responses without crashing.
+3. **Demo vs Personal Separation:** Arjun Verma demo persona remains intact and isolated from newly registered personal accounts.
+4. **Data Isolation:** User B cannot read or alter User A's expenses or goals.
+5. **Conversational Intent Handling:** Greetings and slang receive natural human responses; financial queries use real authenticated data.

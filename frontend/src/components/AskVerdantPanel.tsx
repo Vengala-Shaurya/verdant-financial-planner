@@ -22,6 +22,86 @@ interface AskVerdantPanelProps {
   onRefreshDashboard?: () => void;
 }
 
+// Markdown formatting helper that cleans and renders bold text, lists, and headings cleanly
+const formatMarkdownText = (content: string) => {
+  const lines = content.split('\n');
+  return lines.map((line, idx) => {
+    // Heading lines (e.g., **Heading:** or ### Heading)
+    let processed = line;
+    const isHeading = processed.startsWith('### ') || processed.startsWith('## ') || processed.startsWith('# ');
+    if (isHeading) {
+      processed = processed.replace(/^#+\s*/, '');
+      return (
+        <p key={idx} className="font-semibold text-[#183D32] mt-2 mb-1 text-xs">
+          {renderFormattedInline(processed)}
+        </p>
+      );
+    }
+
+    // Bullet points
+    const isBullet = processed.trimStart().startsWith('- ') || processed.trimStart().startsWith('* ');
+    if (isBullet) {
+      const cleanBullet = processed.trimStart().replace(/^[-*]\s*/, '');
+      return (
+        <div key={idx} className="flex items-start space-x-1.5 ml-1 my-0.5">
+          <span className="text-[#183D32] font-bold">•</span>
+          <span className="flex-1">{renderFormattedInline(cleanBullet)}</span>
+        </div>
+      );
+    }
+
+    // Numbered points (e.g. 1. 2.)
+    const numMatch = processed.trimStart().match(/^(\d+)\.\s+(.*)/);
+    if (numMatch) {
+      return (
+        <div key={idx} className="flex items-start space-x-1.5 ml-1 my-0.5">
+          <span className="text-[#183D32] font-semibold font-mono-num">{numMatch[1]}.</span>
+          <span className="flex-1">{renderFormattedInline(numMatch[2])}</span>
+        </div>
+      );
+    }
+
+    // Empty lines
+    if (!processed.trim()) {
+      return <div key={idx} className="h-1.5" />;
+    }
+
+    // Regular line
+    return (
+      <p key={idx} className="my-0.5">
+        {renderFormattedInline(processed)}
+      </p>
+    );
+  });
+};
+
+// Renders bold (**text** or __text__) and italic (*text*) spans cleanly
+const renderFormattedInline = (text: string): React.ReactNode => {
+  const parts: React.ReactNode[] = [];
+  // Split on bold markdown **...**
+  const boldRegex = /\*\*(.*?)\*\*/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = boldRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+    parts.push(
+      <strong key={match.index} className="font-semibold text-[#183D32]">
+        {match[1]}
+      </strong>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : text;
+};
+
 export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
   isOpen,
   onClose,
@@ -31,6 +111,7 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputQuery, setInputQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const sampleQuestions = [
@@ -50,7 +131,7 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
         setMessages([
           {
             role: 'assistant',
-            content: "Welcome to **Ask VERDANT**, your private financial planning assistant. I use your verified ledger data and deterministic calculations to explain strategy decisions and simulate hypothetical 'what-if' scenarios without altering your actual records."
+            content: "Welcome to **Ask VERDANT**, your private financial planning assistant. I use your verified ledger data, Google Gemini AI synthesis, and deterministic calculations to explain strategy decisions and simulate hypothetical 'what-if' scenarios without altering your actual records."
           }
         ]);
       }
@@ -81,6 +162,9 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
     try {
       const res = await api.askVerdant(q);
       const aiResp: AskVerdantResponse = res.response;
+      if (aiResp.provider) {
+        setActiveProvider(aiResp.provider);
+      }
       const botMsg: ChatMessage = {
         role: 'assistant',
         content: aiResp.answer,
@@ -112,7 +196,14 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
               <Sparkles className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-editorial text-xl font-semibold text-[#183D32]">Ask VERDANT</h3>
+              <div className="flex items-center space-x-2">
+                <h3 className="font-editorial text-xl font-semibold text-[#183D32]">Ask VERDANT</h3>
+                {activeProvider && (
+                  <span className="text-[9px] px-1.5 py-0.2 bg-[#EAF5D6] text-[#183D32] border border-[#183D32]/20 rounded font-mono-num font-semibold">
+                    {activeProvider.includes('Gemini') ? 'Gemini 2.5 Active' : 'Deterministic Mode'}
+                  </span>
+                )}
+              </div>
               <p className="text-[10px] text-[#202822]/60 font-mono-num uppercase tracking-wider">
                 Grounded Financial Assistant & What-If Simulator
               </p>
@@ -134,17 +225,17 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
               <div key={idx} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} space-y-1.5`}>
                 <div className="flex items-center space-x-1.5 text-[10px] text-[#202822]/50 font-mono-num px-1">
                   {isUser ? <User className="w-3 h-3" /> : <Bot className="w-3 h-3 text-[#183D32]" />}
-                  <span>{isUser ? 'You' : 'VERDANT AI Assistant'}</span>
+                  <span>{isUser ? 'You' : 'VERDANT Financial Assistant'}</span>
                 </div>
 
                 <div
                   className={`p-3.5 rounded-sm text-xs leading-relaxed max-w-[92%] ${
                     isUser
                       ? 'bg-[#183D32] text-[#FFFEFA] shadow-xs'
-                      : 'bg-[#F6F3EB] text-[#202822] border border-[#D8DCD1] whitespace-pre-line'
+                      : 'bg-[#F6F3EB] text-[#202822] border border-[#D8DCD1]'
                   }`}
                 >
-                  {m.content}
+                  {isUser ? m.content : formatMarkdownText(m.content)}
 
                   {/* Render hypothetical simulation card if present */}
                   {m.scenario_simulation && (
@@ -190,7 +281,7 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
           {loading && (
             <div className="flex items-center space-x-2 text-xs text-[#183D32] p-2 bg-[#F6F3EB] border border-[#D8DCD1] rounded-sm animate-pulse w-fit">
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              <span>Verifying scenario with calculation engine...</span>
+              <span>Synthesizing response with verified ledger context...</span>
             </div>
           )}
 
@@ -231,7 +322,7 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
               value={inputQuery}
               onChange={(e) => setInputQuery(e.target.value)}
               disabled={loading}
-              className="flex-1 text-xs p-2.5 bg-[#F6F3EB] border border-[#D8DCD1] rounded-sm focus:outline-none focus:border-[#183D32]"
+              className="flex-1 text-xs p-2.5 bg-[#F6F3EB] border border-[#D8DCD1] rounded-sm focus:outline-hidden focus:border-[#183D32]"
             />
             <button
               type="submit"
