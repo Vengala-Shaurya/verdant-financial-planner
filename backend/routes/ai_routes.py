@@ -3,12 +3,18 @@ from models.db import get_db_connection
 from services.ai_service import (
     generate_plan_ai_insights,
     generate_spending_insights,
-    answer_financial_query
+    answer_financial_query,
+    get_ai_status
 )
 from validators.auth import require_auth
 import json
 
 ai_bp = Blueprint('ai', __name__)
+
+@ai_bp.route('/status', methods=['GET'])
+def ai_status():
+    """Returns whether a live AI provider (Groq or Gemini) is actively connected."""
+    return jsonify(get_ai_status())
 
 @ai_bp.route('/plan-insights', methods=['POST'])
 @require_auth

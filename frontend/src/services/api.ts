@@ -355,5 +355,11 @@ export const api = {
     });
     if (!res.ok) throw new Error('Failed to fetch AI chat history');
     return res.json();
+  },
+
+  async getAiStatus(): Promise<{ status: string; provider: string; is_live: boolean }> {
+    const res = await fetch(`${API_BASE}/ai/status`);
+    if (!res.ok) return { status: 'offline', provider: 'Deterministic Mode', is_live: false };
+    return res.json();
   }
 };

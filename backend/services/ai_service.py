@@ -7,47 +7,71 @@ from services.analysis_engine import calculate_financial_health, calculate_goal_
 
 logger = logging.getLogger("verdant.ai")
 
-# Google GenAI SDK Import
+# 1. Groq SDK Import
+try:
+    from groq import Groq
+    GROQ_SDK_AVAILABLE = True
+except ImportError:
+    GROQ_SDK_AVAILABLE = False
+    logger.warning("groq SDK not installed.")
+
+# 2. Google GenAI SDK Import
 try:
     from google import genai
-    from google.genai import types
+    from google.genai import types as gemini_types
     GEMINI_SDK_AVAILABLE = True
 except ImportError:
     GEMINI_SDK_AVAILABLE = False
-    logger.warning("google-genai SDK not installed or unavailable.")
+    logger.warning("google-genai SDK not installed.")
 
-def is_gemini_enabled() -> bool:
-    """Checks if GEMINI_ENABLED is true (default is true if key is present)."""
-    val = os.environ.get("GEMINI_ENABLED", "true").strip().lower()
-    return val in ("true", "1", "yes")
-
-def get_gemini_model_name() -> str:
+def get_active_llm_client() -> Dict[str, Any]:
     """
-    Returns the configured Gemini model identifier.
-    Default: 'gemini-2.5-flash' (Google's latest official high-speed, cost-effective multimodal model with generous free-tier limits).
-    Fallback options: 'gemini-1.5-flash', 'gemini-1.5-pro'.
+    Detects which LLM provider is configured and available.
+    Returns dict: {'type': 'groq'|'gemini'|'none', 'client': client_instance, 'model': model_name}
     """
-    return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    # Priority 1: Groq API
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if GROQ_SDK_AVAILABLE and groq_key:
+        try:
+            client = Groq(api_key=groq_key)
+            model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+            return {'type': 'groq', 'client': client, 'model': model}
+        except Exception as e:
+            logger.warning(f"Failed to initialize Groq client: {e}")
 
-def get_gemini_client() -> Optional[Any]:
-    """
-    Instantiates and returns the official Google GenAI client if GEMINI_API_KEY is configured.
-    Never logs or exposes the key.
-    """
-    if not GEMINI_SDK_AVAILABLE or not is_gemini_enabled():
-        return None
+    # Priority 2: Google Gemini API
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    gemini_enabled = os.environ.get("GEMINI_ENABLED", "true").strip().lower() in ("true", "1", "yes")
+    if GEMINI_SDK_AVAILABLE and gemini_enabled and gemini_key:
+        try:
+            client = genai.Client(api_key=gemini_key)
+            model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash").strip()
+            return {'type': 'gemini', 'client': client, 'model': model}
+        except Exception as e:
+            logger.warning(f"Failed to initialize Google GenAI client: {e}")
 
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        return None
+    return {'type': 'none', 'client': None, 'model': 'none'}
 
-    try:
-        # Initializing client using official google.genai Client
-        client = genai.Client(api_key=api_key)
-        return client
-    except Exception as e:
-        logger.warning(f"Failed to initialize Google GenAI client: {e}")
-        return None
+def get_ai_status() -> Dict[str, Any]:
+    """Returns the current operational AI provider status for frontend badge display."""
+    llm = get_active_llm_client()
+    if llm['type'] == 'groq':
+        return {
+            'status': 'online',
+            'provider': f"Groq ({llm['model']})",
+            'is_live': True
+        }
+    elif llm['type'] == 'gemini':
+        return {
+            'status': 'online',
+            'provider': f"Google Gemini ({llm['model']})",
+            'is_live': True
+        }
+    return {
+        'status': 'offline',
+        'provider': 'Deterministic Mode (AI Offline)',
+        'is_live': False
+    }
 
 def clean_json_text(text: str) -> str:
     """Strips markdown code fences like ```json ... ``` from model responses."""
@@ -68,7 +92,7 @@ def get_ai_explanation(plan_summary: Dict[str, Any], user_name: str = "User") ->
 def generate_plan_ai_insights(plan_summary: Dict[str, Any], user_name: str = "User") -> Dict[str, Any]:
     """
     Feature A: Generates structured narrative explanations for the verified savings plan.
-    Strictly grounded in deterministic figures; Gemini explains but cannot alter numerical allocations.
+    Strictly grounded in deterministic figures; LLM explains but cannot alter numerical allocations.
     """
     fin = plan_summary.get('financial_health', {})
     income = fin.get('income', 0)
@@ -80,23 +104,20 @@ def generate_plan_ai_insights(plan_summary: Dict[str, Any], user_name: str = "Us
     warnings = plan_summary.get('warnings', [])
     actions = plan_summary.get('actions_next_30_days', [])
 
-    client = get_gemini_client()
-    if client:
-        try:
-            model_name = get_gemini_model_name()
-            system_instruction = (
-                "You are an elite, mathematically rigorous wealth architect for VERDANT, an editorial financial planning system. "
-                "You provide clear, encouraging, and actionable commentary grounded STRICTLY in the provided calculations. "
-                "Never contradict the verified surplus, expenses, or allocation numbers. "
-                "Never invent financial figures. Return valid JSON matching the requested schema."
-            )
+    llm = get_active_llm_client()
+    system_instruction = (
+        "You are an elite, mathematically rigorous wealth architect for VERDANT, an editorial financial planning system. "
+        "You provide clear, encouraging, and actionable commentary grounded STRICTLY in the provided calculations. "
+        "Never contradict the verified surplus, expenses, or allocation numbers. "
+        "Never invent financial figures. Return valid JSON matching the requested schema."
+    )
 
-            goals_summary_txt = [
-                f"{g['name']}: Gap ₹{g.get('remaining_gap', 0):,.0f}, Allocated ₹{g.get('allocated_monthly', 0):,.0f}/mo, Feasibility: {g.get('feasibility', 'Evaluated')}"
-                for g in goals
-            ]
+    goals_summary_txt = [
+        f"{g['name']}: Gap ₹{g.get('remaining_gap', 0):,.0f}, Allocated ₹{g.get('allocated_monthly', 0):,.0f}/mo, Feasibility: {g.get('feasibility', 'Evaluated')}"
+        for g in goals
+    ]
 
-            prompt = f"""
+    prompt = f"""
 Analyze this verified financial plan for {user_name}:
 - Take-Home Monthly Income: ₹{income:,.0f}
 - Fixed Essential Living Expenses: ₹{fin.get('fixed_expenses', 0):,.0f}
@@ -118,23 +139,53 @@ Produce a JSON response with exactly these keys:
   "action_plan_30_days": ["Concrete action 1", "Concrete action 2", "Concrete action 3"]
 }}
 """
-            config = types.GenerateContentConfig(
+
+    if llm['type'] == 'groq':
+        try:
+            client = llm['client']
+            resp = client.chat.completions.create(
+                model=llm['model'],
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
+            raw = resp.choices[0].message.content
+            parsed = json.loads(clean_json_text(raw))
+            if "personalized_summary" in parsed and "allocation_rationales" in parsed:
+                return {
+                    'mode': 'llm_active',
+                    'provider': f"Groq ({llm['model']})",
+                    'narrative': parsed.get('personalized_summary', ''),
+                    'allocation_rationales': parsed.get('allocation_rationales', []),
+                    'spending_observations': parsed.get('spending_observations', []),
+                    'discretionary_reductions': parsed.get('discretionary_reductions', []),
+                    'risks_and_tradeoffs': parsed.get('risks_and_tradeoffs', []),
+                    'action_plan_30_days': parsed.get('action_plan_30_days', actions)
+                }
+        except Exception as e:
+            logger.warning(f"Groq Feature A call failed: {e}. Falling back to deterministic engine.")
+
+    elif llm['type'] == 'gemini':
+        try:
+            client = llm['client']
+            config = gemini_types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 response_mime_type="application/json",
                 temperature=0.3
             )
             response = client.models.generate_content(
-                model=model_name,
+                model=llm['model'],
                 contents=prompt,
                 config=config
             )
-
             if response and response.text:
                 parsed = json.loads(clean_json_text(response.text))
                 if "personalized_summary" in parsed and "allocation_rationales" in parsed:
                     return {
                         'mode': 'llm_active',
-                        'provider': f"Google Gemini ({model_name})",
+                        'provider': f"Google Gemini ({llm['model']})",
                         'narrative': parsed.get('personalized_summary', ''),
                         'allocation_rationales': parsed.get('allocation_rationales', []),
                         'spending_observations': parsed.get('spending_observations', []),
@@ -227,7 +278,6 @@ def generate_spending_insights(expenses: List[Dict[str, Any]], income: float, fi
     sorted_cats = sorted(cat_totals.items(), key=lambda x: -x[1])
     top_categories = [{'category': c, 'amount': round(a, 2), 'pct_of_spend': round(a / (total_spent or 1) * 100, 1)} for c, a in sorted_cats]
 
-    # Large expenses threshold: > ₹3,000 or > 10% of income
     large_expense_threshold = max(3000.0, 0.10 * income) if income > 0 else 3000.0
     large_expenses = [
         {'id': e.get('id'), 'description': e.get('description'), 'amount': float(e.get('amount', 0)), 'category': e.get('category'), 'date': e.get('date')}
@@ -236,16 +286,13 @@ def generate_spending_insights(expenses: List[Dict[str, Any]], income: float, fi
 
     has_sufficient_history = len(expenses) >= 5
 
-    client = get_gemini_client()
-    if client and has_sufficient_history:
-        try:
-            model_name = get_gemini_model_name()
-            system_instruction = (
-                "You are an expert personal financial auditor for VERDANT. "
-                "Analyze the provided actual expense records. Do NOT invent transactions or trends. "
-                "Return a JSON object with structured spending insights."
-            )
-            prompt = f"""
+    llm = get_active_llm_client()
+    system_instruction = (
+        "You are an expert personal financial auditor for VERDANT. "
+        "Analyze the provided actual expense records. Do NOT invent transactions or trends. "
+        "Return a JSON object with structured spending insights."
+    )
+    prompt = f"""
 Take-Home Income: ₹{income:,.0f}
 Total Logged Spend: ₹{total_spent:,.0f}
 Top Categories: {top_categories[:4]}
@@ -259,13 +306,44 @@ Return JSON:
   "actionable_trims": ["Actionable recommendation 1", "Actionable recommendation 2"]
 }}
 """
-            config = types.GenerateContentConfig(
+
+    if llm['type'] == 'groq' and has_sufficient_history:
+        try:
+            client = llm['client']
+            resp = client.chat.completions.create(
+                model=llm['model'],
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
+            parsed = json.loads(clean_json_text(resp.choices[0].message.content))
+            return {
+                'mode': 'llm_active',
+                'provider': f"Groq ({llm['model']})",
+                'has_sufficient_history': True,
+                'total_spent': round(total_spent, 2),
+                'top_categories': top_categories[:5],
+                'large_expenses': large_expenses,
+                'large_expense_threshold': large_expense_threshold,
+                'spending_assessment': parsed.get('spending_assessment', ''),
+                'key_observations': parsed.get('key_observations', []),
+                'actionable_trims': parsed.get('actionable_trims', [])
+            }
+        except Exception as e:
+            logger.warning(f"Groq Feature B call failed: {e}. Falling back to deterministic insights.")
+
+    elif llm['type'] == 'gemini' and has_sufficient_history:
+        try:
+            client = llm['client']
+            config = gemini_types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 response_mime_type="application/json",
                 temperature=0.3
             )
             response = client.models.generate_content(
-                model=model_name,
+                model=llm['model'],
                 contents=prompt,
                 config=config
             )
@@ -273,7 +351,7 @@ Return JSON:
                 parsed = json.loads(clean_json_text(response.text))
                 return {
                     'mode': 'llm_active',
-                    'provider': f"Google Gemini ({model_name})",
+                    'provider': f"Google Gemini ({llm['model']})",
                     'has_sufficient_history': True,
                     'total_spent': round(total_spent, 2),
                     'top_categories': top_categories[:5],
@@ -323,10 +401,10 @@ Return JSON:
 # ==============================================================================
 
 def classify_query_intent(query_text: str) -> str:
-    """Classifies user queries into: greeting, casual_short, hypothetical, financial, general."""
+    """Classifies user queries into: greeting, casual, hypothetical, financial, general_knowledge."""
     q = (query_text or '').strip().lower()
-    
-    # Common greetings and small talk
+
+    # Greetings and small talk
     greetings = {"hi", "hello", "hey", "hola", "greetings", "good morning", "good evening", "good afternoon", "namaste"}
     if q in greetings or re.match(r"^(?:hi|hello|hey|greetings|namaste)\b", q):
         return "greeting"
@@ -336,26 +414,29 @@ def classify_query_intent(query_text: str) -> str:
     if q in casual_words or re.match(r"^(?:bruh|bro|yo|sup)\b[!., ]*", q):
         return "casual"
 
-    # Hypothetical what-if queries
+    # Hypothetical what-if scenarios
     if any(k in q for k in ["what if", "suppose", "if my income", "if income", "if rent", "if expenses", "decreases by", "increases by", "falls by", "rises by"]):
         return "hypothetical"
 
-    # Financial domain queries
+    # User financial queries specific to personal ledger
     fin_keywords = ["surplus", "savings", "save", "plan", "goal", "budget", "emergency", "fund", "debt", "emi", "expense", "spend", "income", "money", "invest", "runway", "cash flow", "waterfall", "priority", "allocate"]
     if any(k in q for k in fin_keywords):
         return "financial"
 
-    return "general"
+    # General knowledge / external queries (e.g., "who is the president of india", "what is inflation", etc.)
+    return "general_knowledge"
 
 def answer_financial_query(user_profile: Dict[str, Any], goals: List[Dict[str, Any]], active_plan: Optional[Dict[str, Any]], query: str, conversation_history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """
-    Feature C: Contextual conversational assistant capable of handling greetings,
-    answering user-specific financial questions, simulating hypothetical 'what-if' scenarios,
-    and handling non-financial questions appropriately.
+    Feature C: Contextual conversational assistant capable of:
+    - Routing general-knowledge queries directly to the active LLM.
+    - Handling greetings and casual banter naturally.
+    - Answering user-specific financial questions using verified ledger context.
+    - Simulating hypothetical 'what-if' scenarios deterministically in Python.
+    - Showing clean, honest offline notices for general knowledge if AI is unavailable.
     """
     query_trimmed = query.strip()
-    query_lower = query_trimmed.lower()
-    intent = classify_query_intent(query_lower)
+    intent = classify_query_intent(query_trimmed)
 
     user_name = user_profile.get('name', 'there')
     income = float(user_profile.get('monthly_income', 0) or 0)
@@ -370,11 +451,12 @@ def answer_financial_query(user_profile: Dict[str, Any], goals: List[Dict[str, A
     if intent == "hypothetical":
         delta_income = 0.0
         delta_expenses = 0.0
+        q_lower = query_trimmed.lower()
 
-        inc_decrease_match = re.search(r'income (?:falls|drops|decreases|reduced|down) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
-        inc_increase_match = re.search(r'income (?:rises|increases|grows|up) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
-        rent_increase_match = re.search(r'(?:rent|expenses?|outflows?) (?:increases?|rises?|goes up) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
-        rent_decrease_match = re.search(r'(?:rent|expenses?|outflows?) (?:decreases?|falls?|goes down) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', query_lower)
+        inc_decrease_match = re.search(r'income (?:falls|drops|decreases|reduced|down) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', q_lower)
+        inc_increase_match = re.search(r'income (?:rises|increases|grows|up) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', q_lower)
+        rent_increase_match = re.search(r'(?:rent|expenses?|outflows?) (?:increases?|rises?|goes up) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', q_lower)
+        rent_decrease_match = re.search(r'(?:rent|expenses?|outflows?) (?:decreases?|falls?|goes down) by (?:₹|rs\.?|inr)?\s*([0-9,]+)', q_lower)
 
         if inc_decrease_match:
             delta_income = -float(inc_decrease_match.group(1).replace(',', ''))
@@ -407,24 +489,22 @@ def answer_financial_query(user_profile: Dict[str, Any], goals: List[Dict[str, A
                 ]
             }
 
-    # 2. Try Gemini LLM Generation
-    client = get_gemini_client()
-    if client:
-        try:
-            model_name = get_gemini_model_name()
-            system_instruction = (
-                f"You are Ask VERDANT, an intelligent conversational financial planning assistant for {user_name}. "
-                "Tone: Editorial, intellectual, warm, concise, and mathematically rigorous. "
-                "\nCRITICAL DIRECTIVES:\n"
-                "1. If the user sends a greeting (e.g. 'hi', 'hello', 'hey'), respond with a natural, friendly greeting and briefly invite them to explore their ledger or test a financial scenario. Do NOT dump long financial statistics in response to simple greetings.\n"
-                "2. If the user asks a casual query (e.g. 'bruh', 'sup', 'ok'), give a witty, natural, context-aware reply acknowledging them while gently reminding them of what you can assist with.\n"
-                "3. If the user asks about their finances, use ONLY their verified ledger data provided in the context. Never invent income or expenses.\n"
-                "4. If answering a hypothetical scenario, explain the calculated simulation clearly and remind the user that it does not alter their real saved ledger.\n"
-                "5. If financial information is incomplete (e.g. income is 0 or unrecorded), state what is missing instead of guessing.\n"
-                "6. Format currency consistently as ₹ with commas (e.g. ₹22,000). Use Markdown formatting cleanly."
-            )
+    # 2. Try Active LLM Generation (Groq or Gemini)
+    llm = get_active_llm_client()
+    if llm['type'] != 'none':
+        system_instruction = (
+            f"You are Ask VERDANT, an intelligent conversational financial planning assistant for {user_name}. "
+            "Tone: Editorial, intellectual, warm, concise, and mathematically rigorous. "
+            "\nCRITICAL DIRECTIVES:\n"
+            "1. If the user asks a general-knowledge question (e.g. 'Who is the president of India?', 'What is inflation?'), answer it clearly, directly, and accurately. Do NOT inject unrelated personal surplus or expense numbers into general-knowledge answers.\n"
+            "2. If the user sends a greeting (e.g. 'hi', 'hello'), respond with a natural, friendly greeting and briefly invite them to explore their ledger or test a financial scenario. Do NOT dump long financial statistics in response to simple greetings.\n"
+            "3. If the user asks a casual query (e.g. 'bruh', 'sup'), give a natural conversational reply acknowledging them.\n"
+            "4. If the user asks about their finances, use ONLY their verified ledger data provided in the context. Never invent income or expenses.\n"
+            "5. If answering a hypothetical scenario, explain the calculated simulation clearly and remind the user that it does not alter their real saved ledger.\n"
+            "6. Format currency consistently as ₹ with commas (e.g. ₹22,000). Use Markdown formatting cleanly."
+        )
 
-            user_context_block = f"""
+        user_context_block = f"""
 AUTHENTICATED USER CONTEXT ({user_name}):
 - Verified Take-Home Income: ₹{income:,.0f}
 - Verified Fixed Living Expenses: ₹{fixed_exp:,.0f}
@@ -434,42 +514,73 @@ AUTHENTICATED USER CONTEXT ({user_name}):
 - Liquid Emergency Savings: ₹{savings:,.0f}
 - Active Goals: {[{'name': g.get('name'), 'target': f"₹{float(g.get('target_amount',0)):,.0f}", 'saved': f"₹{float(g.get('current_amount',0)):,.0f}", 'priority': g.get('priority')} for g in goals]}
 """
-            if scenario_result:
-                user_context_block += f"\nHYPOTHETICAL SIMULATION RESULT (Calculated by Python Engine):\n{json.dumps(scenario_result)}"
+        if scenario_result:
+            user_context_block += f"\nHYPOTHETICAL SIMULATION RESULT (Calculated by Python Engine):\n{json.dumps(scenario_result)}"
 
-            # Prepare prompt contents with recent history
-            contents = []
-            contents.append(user_context_block)
-            if conversation_history:
-                for h in conversation_history[-4:]:
-                    role_label = "User" if h.get('role') == 'user' else "Assistant"
-                    contents.append(f"{role_label}: {h.get('content', '')}")
-            contents.append(f"User Question: {query_trimmed}")
+        if llm['type'] == 'groq':
+            try:
+                client = llm['client']
+                messages = [{"role": "system", "content": system_instruction}]
+                # Only include user financial context if intent is financial or hypothetical
+                if intent in ('financial', 'hypothetical'):
+                    messages.append({"role": "system", "content": user_context_block})
 
-            full_prompt = "\n\n".join(contents)
-            config = types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.3
-            )
-            response = client.models.generate_content(
-                model=model_name,
-                contents=full_prompt,
-                config=config
-            )
+                if conversation_history:
+                    for h in conversation_history[-4:]:
+                        messages.append({"role": h.get('role', 'user'), "content": h.get('content', '')})
 
-            if response and response.text:
+                messages.append({"role": "user", "content": query_trimmed})
+
+                resp = client.chat.completions.create(
+                    model=llm['model'],
+                    messages=messages,
+                    temperature=0.3
+                )
+                answer_text = resp.choices[0].message.content.strip()
                 return {
                     'mode': 'llm_active',
-                    'provider': f"Google Gemini ({model_name})",
-                    'answer': response.text.strip(),
+                    'provider': f"Groq ({llm['model']})",
+                    'answer': answer_text,
                     'scenario_simulation': scenario_result
                 }
-        except Exception as e:
-            logger.warning(f"Gemini Feature C call failed: {e}. Falling back to contextual fallback.")
+            except Exception as e:
+                logger.warning(f"Groq Feature C call failed: {e}. Falling back to contextual fallback.")
 
-    # 3. Contextual Fallback Generator (Handles Greetings, Slang, What-Ifs, and Financial queries naturally)
+        elif llm['type'] == 'gemini':
+            try:
+                client = llm['client']
+                contents = []
+                if intent in ('financial', 'hypothetical'):
+                    contents.append(user_context_block)
+
+                if conversation_history:
+                    for h in conversation_history[-4:]:
+                        role_label = "User" if h.get('role') == 'user' else "Assistant"
+                        contents.append(f"{role_label}: {h.get('content', '')}")
+                contents.append(f"User Question: {query_trimmed}")
+
+                config = gemini_types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.3
+                )
+                response = client.models.generate_content(
+                    model=llm['model'],
+                    contents="\n\n".join(contents),
+                    config=config
+                )
+                if response and response.text:
+                    return {
+                        'mode': 'llm_active',
+                        'provider': f"Google Gemini ({llm['model']})",
+                        'answer': response.text.strip(),
+                        'scenario_simulation': scenario_result
+                    }
+            except Exception as e:
+                logger.warning(f"Gemini Feature C call failed: {e}. Falling back to contextual fallback.")
+
+    # 3. Contextual Offline Fallback (Distinguishes greetings, general knowledge, what-ifs, and financial queries)
     answer_text = generate_contextual_query_answer(
-        intent, query_lower, user_name, income, fixed_exp, var_exp, debt, savings, current_surplus, goals, active_plan, scenario_result
+        intent, query_trimmed.lower(), user_name, income, fixed_exp, var_exp, debt, savings, current_surplus, goals, active_plan, scenario_result
     )
 
     return {
@@ -484,7 +595,15 @@ def generate_contextual_query_answer(
 ) -> str:
     """Generates context-aware responses when the live LLM is offline or unconfigured."""
 
-    # 1. Greetings
+    # 1. General Knowledge queries when AI is offline
+    if intent == "general_knowledge":
+        return (
+            "I am currently operating in **Deterministic Mode (AI Offline)**. "
+            "To answer general-knowledge or external research questions, a live AI provider (such as Groq or Gemini) is required.\n\n"
+            "While offline, I can still analyze your verified ledger data, calculate your surplus, evaluate goal feasibility, and simulate hypothetical cash-flow adjustments."
+        )
+
+    # 2. Greetings
     if intent == "greeting":
         return (
             f"Hello {user_name}! I am **Ask VERDANT**, your private financial planning assistant.\n\n"
@@ -492,14 +611,14 @@ def generate_contextual_query_answer(
             f"You can ask me questions about your savings plan, explore your goal priorities, or test what-if scenarios (e.g., *'What happens if my income falls by ₹5,000?'*)."
         )
 
-    # 2. Casual / Slang
+    # 3. Casual / Slang
     if intent == "casual":
         return (
             f"I hear you! I'm here and ready to help you optimize your personal wealth architecture. "
             f"Feel free to ask a question about your ₹{current_surplus:,.0f} surplus, your goals, or test any financial change."
         )
 
-    # 3. Hypothetical simulation
+    # 4. Hypothetical simulation
     if scenario_result:
         shift_str = f"+₹{scenario_result['surplus_shift']:,.0f}" if scenario_result['surplus_shift'] >= 0 else f"-₹{abs(scenario_result['surplus_shift']):,.0f}"
         return (
@@ -509,14 +628,14 @@ def generate_contextual_query_answer(
             f"*Note: This is an exploratory simulation for strategic planning only. Your persistent profile values remain unchanged.*"
         )
 
-    # 4. Incomplete financial data
+    # 5. Incomplete financial data
     if income <= 0:
         return (
             f"Your financial baseline currently has no recorded take-home income. "
             f"To provide accurate financial projections, please update your profile with your monthly income and fixed commitments in the Financial Profile tab."
         )
 
-    # 5. Targeted financial inquiries
+    # 6. Targeted financial inquiries
     if 'why' in query and 'plan' in query:
         return (
             f"Your current plan was generated using VERDANT's priority-weighted waterfall algorithm. "

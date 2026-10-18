@@ -124,19 +124,26 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
 
   const loadHistory = async () => {
     try {
-      const res = await api.getAiHistory();
-      if (res.history && res.history.length > 0) {
-        setMessages(res.history);
+      const [histRes, statusRes] = await Promise.all([
+        api.getAiHistory(),
+        api.getAiStatus()
+      ]);
+      if (statusRes && statusRes.provider) {
+        setActiveProvider(statusRes.provider);
+      }
+      if (histRes.history && histRes.history.length > 0) {
+        setMessages(histRes.history);
       } else {
+        const providerName = statusRes?.is_live ? statusRes.provider : 'deterministic financial logic';
         setMessages([
           {
             role: 'assistant',
-            content: "Welcome to **Ask VERDANT**, your private financial planning assistant. I use your verified ledger data, Google Gemini AI synthesis, and deterministic calculations to explain strategy decisions and simulate hypothetical 'what-if' scenarios without altering your actual records."
+            content: `Welcome to **Ask VERDANT**, your private financial planning assistant powered by ${providerName}. I can answer questions about your personal wealth, simulate hypothetical what-if scenarios, or assist with general knowledge.`
           }
         ]);
       }
     } catch (e) {
-      console.error('Failed to load chat history', e);
+      console.error('Failed to load chat history or AI status', e);
     }
   };
 
@@ -199,8 +206,12 @@ export const AskVerdantPanel: React.FC<AskVerdantPanelProps> = ({
               <div className="flex items-center space-x-2">
                 <h3 className="font-editorial text-xl font-semibold text-[#183D32]">Ask VERDANT</h3>
                 {activeProvider && (
-                  <span className="text-[9px] px-1.5 py-0.2 bg-[#EAF5D6] text-[#183D32] border border-[#183D32]/20 rounded font-mono-num font-semibold">
-                    {activeProvider.includes('Gemini') ? 'Gemini 2.5 Active' : 'Deterministic Mode'}
+                  <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono-num font-semibold border ${
+                    !activeProvider.includes('Offline') && !activeProvider.includes('Deterministic')
+                      ? 'bg-[#EAF5D6] text-[#183D32] border-[#183D32]/20'
+                      : 'bg-[#F6F3EB] text-[#202822]/70 border-[#D8DCD1]'
+                  }`}>
+                    {activeProvider}
                   </span>
                 )}
               </div>
